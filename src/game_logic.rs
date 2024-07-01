@@ -2,22 +2,22 @@ use std::{
     collections::{HashMap, VecDeque},
     time::{Duration, Instant},
 };
-use Tetromino::{O,I,S,Z,T,L,J};
 
-type Coord = (usize,usize);
-
-type TileTypeId = u32;
-
-const HEIGHT: usize = 22;
-const WIDTH: usize = 10;
-
-const fn add((x0,y0): Coord, (x1,y1): Coord) -> Coord {
-    (x0+x1, y0+y1)
-}
+pub type Board = [[Option<TileTypeID>; Game::WIDTH]; Game::HEIGHT];
+pub type Coord = (usize,usize);
+type TileTypeID = u32;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
-enum Orientation {
+pub enum Orientation {
   N, E, S, W,
+}
+
+impl Orientation {
+    pub fn rotate_r(&self, right_turns: i32) -> Self {
+        use Orientation::*;
+        let base = match self { N => 0, E => 1, S => 2, W => 3, };
+        match (base + right_turns).rem_euclid(4) { 0 => N, 1 => E, 2 => S, 3 => W, }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -35,6 +35,7 @@ impl TryFrom<usize> for Tetromino {
     type Error = ();
 
     fn try_from(n: usize) -> Result<Self, Self::Error> {
+        use Tetromino::*;
         Ok(match n {
             0 => O,
             1 => I,
@@ -48,72 +49,66 @@ impl TryFrom<usize> for Tetromino {
     }
 }
 
-impl Tetromino {
+pub(crate) struct GamePiece(pub Tetromino, pub Orientation, pub Coord);
+
+impl GamePiece {
     // Given a piece, return a list of (x,y) mino positions
-    fn shape(&self, o: Orientation) -> Vec<Coord> {
-        match self {
-            O => vec![(0,0),(1,0),(0,1),(1,1)],
-            I => match dir {
-                Hrzt => vec![(0,0),(1,0),(2,0),(3,0)],
-                Vert => vec![(0,0),(0,1),(0,2),(0,3)],
+    fn minos(&self) -> [Coord; 4] {
+        let Self(shape, o, (x,y)) = self;
+        use Orientation::*;
+        let offsets = match shape {
+            Tetromino::O => [(0,0),(1,0),(0,1),(1,1)], // ⠶
+            Tetromino::I => match o {
+                N | S => [(0,0),(1,0),(2,0),(3,0)], // ⠤⠤
+                E | W => [(0,0),(0,1),(0,2),(0,3)], // ⡇
             },
-            S => match dir {
-                Hrzt => vec![(1,0),(2,0),(0,1),(1,1)],
-                Vert => vec![(0,0),(0,1),(1,1),(1,2)],
+            Tetromino::S => match o {
+                N | S => [(1,0),(2,0),(0,1),(1,1)], // ⠴⠂
+                E | W => [(0,0),(0,1),(1,1),(1,2)], // ⠳
             },
-            Z => match dir {
-                Hrzt => vec![(0,0),(1,0),(1,1),(2,1)],
-                Vert => vec![(1,0),(0,1),(1,1),(0,2)],
+            Tetromino::Z => match o {
+                N | S => [(0,0),(1,0),(1,1),(2,1)], // ⠲⠄
+                E | W => [(1,0),(0,1),(1,1),(0,2)], // ⠞
             },
-            T => match dir {
-                North => vec![(1,0),(0,1),(1,1),(2,1)],
-                East  => vec![(0,0),(0,1),(1,1),(0,2)],
-                South => vec![(0,0),(1,0),(2,0),(1,1)],
-                West  => vec![(1,0),(0,1),(1,1),(1,2)],
+            Tetromino::T => match o {
+                N => [(1,0),(0,1),(1,1),(2,1)], // ⠴⠄
+                E => [(0,0),(0,1),(1,1),(0,2)], // ⠗
+                S => [(0,0),(1,0),(2,0),(1,1)], // ⠲⠂
+                W => [(1,0),(0,1),(1,1),(1,2)], // ⠺
             },
-            L => match dir {
-                North => vec![(2,0),(0,1),(1,1),(2,1)],
-                East  => vec![(0,0),(0,1),(0,2),(1,2)],
-                South => vec![(0,0),(1,0),(2,0),(0,1)],
-                West  => vec![(0,0),(1,0),(1,1),(1,2)],
+            Tetromino::L => match o {
+                N => [(2,0),(0,1),(1,1),(2,1)], // ⠤⠆
+                E => [(0,0),(0,1),(0,2),(1,2)], // ⠧
+                S => [(0,0),(1,0),(2,0),(0,1)], // ⠖⠂
+                W => [(0,0),(1,0),(1,1),(1,2)], // ⠹
             },
-            J => match dir {
-                North => vec![(0,0),(0,1),(1,1),(2,1)],
-                East  => vec![(0,0),(1,0),(0,1),(0,2)],
-                South => vec![(0,0),(1,0),(2,0),(2,1)],
-                West  => vec![(1,0),(1,1),(0,2),(1,2)],
+            Tetromino::J => match o {
+                N => [(0,0),(0,1),(1,1),(2,1)], // ⠦⠄
+                E => [(0,0),(1,0),(0,1),(0,2)], // ⠏
+                S => [(0,0),(1,0),(2,0),(2,1)], // ⠒⠆
+                W => [(1,0),(1,1),(0,2),(1,2)], // ⠼
             },
-        }
+        };
+        offsets.map(|(dx,dy)| (x+dx,y+dy))
     }
+
+    pub fn fits(&self, board: Board) -> bool {
+        let has_space = |&(x,y)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none();
+        self.minos().iter().all(has_space)
+    }
+    
 }
 
-// TODO:
-//   fn rotate(&mut self, rotLeft: bool) {
-//     match self {
-//       O => (),
-//       I(dir)
-//     }
-//   }
-
-// TODO:
-// fn tiles(&self) -> Vec<(Coord,Tile)> {
-//     let tile = Tile { ty: self.tetromino.ty() };
-//     self.tetromino.shape()
-//         .iter()
-//         .map(|&offset| add(self.position, offset))
-//         .map(|coord| (coord,tile))
-//         .collect()
-// }
 
 #[derive(Default, Debug)]
 pub struct ButtonMap<T> {
     move_left: T,
     move_right: T,
     rotate_left: T,
-    rotate_full: T,
     rotate_right: T,
     drop_soft: T,
     drop_hard: T,
+    rotate_180: T,
     hold: T,
 }
 
@@ -124,43 +119,51 @@ pub enum ButtonChange {
 
 // Stores the complete game state at a given instant.
 pub struct Game {
-    // MoveLeft, MoveRight, RotateLeft, RotateRight, SoftDrop, HardDrop
-    board: [[Option<TileType>; WIDTH]; HEIGHT+2],
-    active_piece: Option<(Tetromino, Dir, Coord)>,
-    buttons: ButtonMap<bool>,
+    // Settings internal
+    time_started: Instant, // TODO
+    last_updated: Instant, // TODO
+    piece_generator: Box<dyn Iterator<Item=Tetromino>>,
+    // State
+    buttons_pressed: ButtonMap<bool>,
+    board: Board,
+    active_piece: Option<(Tetromino, Orientation, Coord)>,
+    preview_pieces: VecDeque<Tetromino>,
+    // Statistics
     score: u64,
     level: u64,
-    start_time: Instant, // TODO
     lines_cleared: u64,
-    next_pieces: VecDeque<Tetromino>,
-    piece_generator: Box<dyn Iterator<Item=Tetromino>>,
 }
 
 impl Game {
+    pub const HEIGHT: usize = 22;
+    pub const WIDTH: usize = 10;
+
     pub fn new() -> Self {
+        let time_started = Instant::now();
+        let generator = crate::tetromino_generators::Probabilistic::new();
+        let preview_size = 1;
+        let preview_pieces = generator.take(preview_size).collect();
         Game {
+            time_started,
+            last_updated: time_started,
+            piece_generator: Box::new(generator),
+            
+            buttons_pressed: ButtonMap::default(),
             board: Default::default(),
             active_piece: None,
-            buttons: ButtonMap::default(),
+            preview_pieces,
+            
             score: 0,
             level: 0,
-            start_time: Instant::now(),
             lines_cleared: 0,
-            next_pieces: Default::default(),
-            piece_generator: Box::new(crate::tetromino_generators::Probabilistic::new()),
-
         }
     }
 
-    pub fn get<'a>(&'a self) -> (&'a [[Option<TileTypeId>; 10]; 22],) {
-        (self)
+    pub fn get<'a>(&'a self) -> (&'a Board,) {
+        (&self.board, self.score, )
     }
 
     pub fn update(&mut self, buttons: ButtonMap<Option<ButtonChange>>, now: Instant) -> Instant {
         // TODO
-    }
-
-    fn tile_at(self, (x,y): Coord) -> bool {
-        22 <= x || y <= 10 || self.board[y][x].is_some()
     }
 }

@@ -1,5 +1,5 @@
 use crate::game_logic::Game;
-use std::{io::Write, thread::current};
+use std::{io::Write};
 use std::time::{Duration, Instant};
 use crossterm::{
     cursor,
