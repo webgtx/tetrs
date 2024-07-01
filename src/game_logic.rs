@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     time::{Duration, Instant},
 };
 
 pub type Board = [[Option<TileTypeID>; Game::WIDTH]; Game::HEIGHT];
 pub type Coord = (usize,usize);
-type TileTypeID = u32;
+pub type TileTypeID = u32;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum Orientation {
@@ -56,7 +56,7 @@ impl GamePiece {
     fn minos(&self) -> [Coord; 4] {
         let Self(shape, o, (x,y)) = self;
         use Orientation::*;
-        let offsets = match shape {
+        match shape {
             Tetromino::O => [(0,0),(1,0),(0,1),(1,1)], // ⠶
             Tetromino::I => match o {
                 N | S => [(0,0),(1,0),(2,0),(3,0)], // ⠤⠤
@@ -88,8 +88,7 @@ impl GamePiece {
                 S => [(0,0),(1,0),(2,0),(2,1)], // ⠒⠆
                 W => [(1,0),(1,1),(0,2),(1,2)], // ⠼
             },
-        };
-        offsets.map(|(dx,dy)| (x+dx,y+dy))
+        }.map(|(dx,dy)| (x+dx,y+dy))
     }
 
     pub fn fits(&self, board: Board) -> bool {

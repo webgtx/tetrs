@@ -2,18 +2,16 @@ use crate::game_logic::{Coord, Board, GamePiece, Tetromino, Orientation};
 
 type Offset = (isize,isize);
 
-trait RotationSystem {
-    fn rotate_right(board: Board, piece: GamePiece) -> Option<GamePiece>;
-    fn rotate_left(board: Board, piece: GamePiece) -> Option<GamePiece>;
-    fn rotate_180(board: Board, piece: GamePiece) -> Option<GamePiece>;
+pub trait RotationSystem {
+    fn rotate(board: Board, piece: GamePiece, right_turns: i32) -> Option<GamePiece>;
 }
 
-pub fn add((x0,y0): Coord, (x1,y1): Offset) -> Option<Coord> {
+fn add((x0,y0): Coord, (x1,y1): Offset) -> Option<Coord> {
     Some((x0.checked_add_signed(x1)?, y0.checked_add_signed(y1)?))
 }
 
-fn find_first_valid_kick(board: Board, piece:GamePiece, right_turns: i32, mut kicks: impl IntoIterator<Item=Offset>) -> Option<GamePiece> {
-    let GamePiece(shape, o, pos) = piece;
+fn first_valid_kick(board: Board, old_piece: GamePiece, right_turns: i32, mut kicks: impl IntoIterator<Item=Offset>) -> Option<GamePiece> {
+    let GamePiece(shape, o, pos) = old_piece;
     kicks.into_iter().find_map(|offset| {
         let new_piece = GamePiece(shape, o.rotate_r(right_turns), add(pos, offset)?);
         if new_piece.fits(board) {
@@ -24,68 +22,91 @@ fn find_first_valid_kick(board: Board, piece:GamePiece, right_turns: i32, mut ki
     })
 }
 
-struct NintendoRS;
+pub struct NintendoRS;
 impl RotationSystem for NintendoRS {
-    fn rotate_right(board: Board, piece: GamePiece) -> Option<GamePiece> {
+    fn rotate(board: Board, piece: GamePiece, right_turns: i32) -> Option<GamePiece> {
         let GamePiece(shape, o, pos) = piece;
+        let r = match right_turns.rem_euclid(4) {
+            0 => return Some(piece),
+            1 => true,
+            2 => return first_valid_kick(board, piece, 2, std::iter::once((0,0))),
+            3 => false,
+        };
         use Orientation::*;
         let kick = match shape {
             Tetromino::O => (0,0), // ⠶ -> ⠶
             Tetromino::I => match o {
-                N | S => (2,2), // ⠤⠤  -> ⡇
-                E | W => (-2,-2), // ⡇ -> ⠤⠤
+                N | S => (2,2), // ⠤⠤ -> ⡇
+                E | W => (-2,-2), // ⡇  -> ⠤⠤
+            },
+            Tetromino::S | Tetromino::Z => match o {
+                N | S => (1,1), // ⠴⠂ -> ⠳ // ⠲⠄ -> ⠞
+                E | W => (-1,-1), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
+            },
+            Tetromino::T | Tetromino::L | Tetromino::J => match o {
+                N => if r {(1,0)} else {(-1,0)}, // ⠴⠄ -> ⠗ // ⠤⠆ -> ⠧ // ⠦⠄ -> ⠏
+                E => if r {(-1,-1)} else {(1,1)}, // ⠗  -> ⠲⠂ // ⠧  -> ⠖⠂ // ⠏  -> ⠒⠆
+                S => if r {(0,1)} else {(0,-1)}, // ⠲⠂ -> ⠺ // ⠖⠂ -> ⠹ // ⠒⠆ -> ⠼
+                W => (0,0), // ⠺  -> ⠴⠄ // ⠹  -> ⠤⠆ // ⠼  -> ⠦⠄
+            },
+        };
+        first_valid_kick(board, piece, right_turns, std::iter::once(kick))
+    }
+}
+
+// TODO ? The Leaning Rotation System.
+pub struct LeaningRS;
+impl RotationSystem for LeaningRS {
+    fn rotate(board: Board, piece: GamePiece, right_turns: i32) -> Option<GamePiece> {
+        todo!("Leaning Rotation System not yet implemented");
+        let GamePiece(shape, o, pos) = piece;
+        let r = match right_turns.rem_euclid(4) {
+            0 => return Some(piece),
+            1 => true,
+            2 => return first_valid_kick(board, GamePiece(shape, o.rotate_r(2), pos), 2, std::iter::once((0,0))),
+            3 => false,
+            _ => unreachable!()
+        };
+        use Orientation::*;
+        let kick = match shape {
+            Tetromino::O => (0,0), // ⠶ -> ⠶
+            Tetromino::I => match o {
+                N | S => (2,2), // ⠤⠤ -> ⡇
+                E | W => (-2,-2), // ⡇  -> ⠤⠤
             },
             Tetromino::S => match o {
-                N | S => (0,0), // ⠴⠂ -> ⠳ // TODO
-                E | W => (0,0), // ⠳  -> ⠴⠂
+                N | S => (1,1), // ⠴⠂ -> ⠳ 
+                E | W => (-1,-1), // ⠳  -> ⠴⠂
             },
             Tetromino::Z => match o {
-                N | S => (0,0), // ⠲⠄ -> ⠞
-                E | W => (0,0), // ⠞  -> ⠲⠄
+                N | S => (1,1), // ⠲⠄ -> ⠞
+                E | W => (-1,-1), // ⠞  -> ⠲⠄
             },
             Tetromino::T => match o {
-                N => (0,0), // ⠴⠄ -> ⠗
-                E => (0,0), // ⠗  -> ⠲⠂
-                S => (0,0), // ⠲⠂ -> ⠺
+                N => if r {(1,0)} else {(-1,0)}, // ⠴⠄ -> ⠗
+                E => if r {(-1,-1)} else {(1,1)}, // ⠗  -> ⠲⠂
+                S => if r {(0,1)} else {(0,-1)}, // ⠲⠂ -> ⠺
                 W => (0,0), // ⠺  -> ⠴⠄
             },
             Tetromino::L => match o {
-                N => (0,0), // ⠤⠆ -> ⠧
-                E => (0,0), // ⠧  -> ⠖⠂
-                S => (0,0), // ⠖⠂ -> ⠹
+                N => if r {(1,0)} else {(-1,0)}, // ⠤⠆ -> ⠧
+                E => if r {(-1,-1)} else {(1,1)}, // ⠧  -> ⠖⠂
+                S => if r {(0,1)} else {(0,-1)}, // ⠖⠂ -> ⠹
                 W => (0,0), // ⠹  -> ⠤⠆
             },
             Tetromino::J => match o {
-                N => (0,0), // ⠦⠄ -> ⠏
-                E => (0,0), // ⠏  -> ⠒⠆
-                S => (0,0), // ⠒⠆ -> ⠼
+                N => if r {(1,0)} else {(-1,0)}, // ⠦⠄ -> ⠏
+                E => if r {(-1,-1)} else {(1,1)}, // ⠏  -> ⠒⠆
+                S => if r {(0,1)} else {(0,-1)}, // ⠒⠆ -> ⠼
                 W => (0,0), // ⠼  -> ⠦⠄
             },
         };
-        find_first_valid_kick(board, piece, 1, [kick])
-    }
-
-    fn rotate_left(board: Board, piece: GamePiece) -> Option<GamePiece> {
-        unimplemented!()
-    }
-    
-    fn rotate_180(board: Board, piece: GamePiece) -> Option<GamePiece> {
-        unimplemented!()
+        first_valid_kick(board, piece, 1, std::iter::once(kick))
     }
 }
 
-// The Super Rotation System.
+// TODO ? The Super Rotation System.
 struct SuperRS;
-impl RotationSystem for SuperRS {
-    fn rotate_right(board: Board, piece: GamePiece) -> Option<GamePiece> {
-        unimplemented!()
-    }
 
-    fn rotate_left(board: Board, piece: GamePiece) -> Option<GamePiece> {
-        unimplemented!()
-    }
-    
-    fn rotate_180(board: Board, piece: GamePiece) -> Option<GamePiece> {
-        unimplemented!()
-    }
-}
+// TODO ? The Arika Rotation System.
+struct ArikaRS;
