@@ -1,4 +1,4 @@
-use crate::{
+use crate::backend::{
     tetromino_generators,
     rotation_systems,
 };
@@ -191,12 +191,6 @@ pub struct ButtonMap<T> {
     ds: T,
     dh: T,
     h: T,
-}
-
-impl<T: Clone> ButtonMap<T> {
-    pub fn new(init: T) -> Self {
-        Self { ml: init.clone(), mr: init.clone(), rl: init.clone(), rr: init.clone(), ra: init.clone(), ds: init.clone(), dh: init.clone(), h: init.clone() }
-    }
 }
 
 impl<T> std::ops::Index<Button> for ButtonMap<T> {

@@ -1,4 +1,4 @@
-use crate::game_logic::{Coord, Board, ActivePiece, Tetromino, Orientation};
+use crate::backend::game::{Coord, Board, ActivePiece, Tetromino, Orientation};
 
 pub type RotateFn = fn(board: Board, piece: ActivePiece, right_turns: i32) -> Option<ActivePiece>;
 type Offset = (isize,isize);

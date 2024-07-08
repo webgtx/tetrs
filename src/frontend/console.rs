@@ -1,4 +1,4 @@
-use crate::game_logic::{Button, ButtonChange, ButtonMap, Game, Gamemode};
+use crate::backend::game::{Button, ButtonChange, ButtonMap, Game, Gamemode};
 
 use std::{
     collections::HashMap, io::Write, sync::mpsc, time::{Duration, Instant}
@@ -6,7 +6,7 @@ use std::{
 
 //use device_query;
 use crossterm::{
-    cursor::{self, MoveLeft},
+    cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style,
     terminal,
@@ -14,7 +14,7 @@ use crossterm::{
 };
 use device_query::{keymap as dq, DeviceEvents};
 
-const GAME_DRAW_RATE: u64 = 3; // 60fps
+const GAME_FPS: f64 = 60.0; // 60fps
 
 struct Settings {
     keybinds: HashMap<dq::Keycode, Button>,
@@ -78,18 +78,21 @@ fn enter_settings(w: &mut dyn Write, settings: &mut Settings) -> std::io::Result
 }
 
 fn enter_game(w: &mut dyn Write, settings: &Settings, game: &mut Game) -> std::io::Result<ScreenChange> {
-    // Prepare channel from which to receive Button inputs or pause interrupt
+    // Prepare channel with which to communicate Button inputs / game interrupt
     let (sx1, rx) = mpsc::channel();
     let sx2 = sx1.clone();
     let keybinds1 = std::sync::Arc::new(settings.keybinds.clone());
     let keybinds2 = keybinds1.clone();
-    // Initialize callbacks with which to send
+    // Initialize callbacks which send Button inputs
     let device_state = device_query::DeviceState::new();
     let _guard1 =  device_state.on_key_down(move |key| {
         let signal = match key {
+            // Escape pressed: send interrupt
             dq::Keycode::Escape => None,
             _ => match keybinds1.get(key) {
+                // Button pressed with no binding: ignore
                 None => return,
+                // Button pressed with binding
                 Some(&button) => Some((button, true)),
             }
         };
@@ -97,25 +100,27 @@ fn enter_game(w: &mut dyn Write, settings: &Settings, game: &mut Game) -> std::i
     });
     let _guard2 =  device_state.on_key_up(move |key| {
         let signal = match key {
-            dq::Keycode::Escape => None,
+            // Escape released: ignore
+            dq::Keycode::Escape => return,
             _ => match keybinds2.get(key) {
+                // Button pressed with no binding: ignore
                 None => return,
+                // Button released with binding
                 Some(&button) => Some((button, false)),
             }
         };
         let _ = sx2.send(signal);
     });
     // Game Loop
-    let start = Instant::now();
-    let frame_len = Duration::from_secs_f64(1.0 / 60.0);
+    let game_loop_start = Instant::now();
     for i in 1u32.. {
-        let next_frame = start + i*frame_len;
-        let frame_left = next_frame - Instant::now();
-        match rx.recv_timeout(frame_left) {
+        let next_frame = game_loop_start + Duration::from_secs_f64(f64::from(i) / GAME_FPS);
+        let frame_delay = next_frame - Instant::now();
+        match rx.recv_timeout(frame_delay) {
             Ok(None) => return Ok(ScreenChange::Enter(Screen::Settings)),
             Ok(Some((button, is_press_down))) => {
                 let now = Instant::now();
-                let mut changes = ButtonMap::new(None);
+                let mut changes = ButtonMap::default();
                 changes[button] = Some(is_press_down);
                 game.update(Some(changes), now);
             },
@@ -125,6 +130,7 @@ fn enter_game(w: &mut dyn Write, settings: &Settings, game: &mut Game) -> std::i
             },
             Err(mpsc::RecvTimeoutError::Disconnected) => todo!(),
         };
+        //TODO draw game!
     }
     Ok(ScreenChange::Exit)
 }

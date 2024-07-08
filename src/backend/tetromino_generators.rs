@@ -1,4 +1,4 @@
-use crate::game_logic::Tetromino;
+use crate::backend::game::Tetromino;
 
 use rand::{
     self,
