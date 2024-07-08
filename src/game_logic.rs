@@ -169,17 +169,68 @@ impl Gamemode {
     //TODO Gamemode pub fn finesse() -> Self : minimize Finesse(u64) for certain linecount...
 }
 
+#[derive(Copy, Clone)]
+pub enum Button {
+    MoveLeft,
+    MoveRight,
+    RotateLeft,
+    RotateRight,
+    RotateAround,
+    DropSoft,
+    DropHard,
+    Hold,
+}
 
 #[derive(Default, Debug)]
 pub struct ButtonMap<T> {
-    move_left: T,
-    move_right: T,
-    rotate_left: T,
-    rotate_right: T,
-    drop_soft: T,
-    drop_hard: T,
-    rotate_180: T,
-    hold: T,
+    ml: T,
+    mr: T,
+    rl: T,
+    rr: T,
+    ra: T,
+    ds: T,
+    dh: T,
+    h: T,
+}
+
+impl<T: Clone> ButtonMap<T> {
+    pub fn new(init: T) -> Self {
+        Self { ml: init.clone(), mr: init.clone(), rl: init.clone(), rr: init.clone(), ra: init.clone(), ds: init.clone(), dh: init.clone(), h: init.clone() }
+    }
+}
+
+impl<T> std::ops::Index<Button> for ButtonMap<T> {
+    type Output = T;
+
+    fn index(&self, b: Button) -> &Self::Output {
+        use Button::*;
+        match b {
+            MoveLeft => &self.ml,
+            MoveRight => &self.mr,
+            RotateLeft => &self.rl,
+            RotateRight => &self.rr,
+            RotateAround => &self.ra,
+            DropSoft => &self.ds,
+            DropHard => &self.dh,
+            Hold => &self.h,
+        }
+    }
+}
+
+impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
+    fn index_mut(&mut self, b: Button) -> &mut Self::Output {
+        use Button::*;
+        match b {
+            MoveLeft => &mut self.ml,
+            MoveRight => &mut self.mr,
+            RotateLeft => &mut self.rl,
+            RotateRight => &mut self.rr,
+            RotateAround => &mut self.ra,
+            DropSoft => &mut self.ds,
+            DropHard => &mut self.dh,
+            Hold => &mut self.h,
+        }
+    }
 }
 
 enum GameState {
@@ -270,30 +321,30 @@ impl Game {
 
     fn droptime(lvl: u64) -> Duration {
         Duration::from_nanos(match lvl {
-            1  => 1000000000,
-            2  =>  793000000,
-            3  =>  617796000,
-            4  =>  472729139,
-            5  =>  355196928,
-            6  =>  262003550,
-            7  =>  189677245,
-            8  =>  134734731,
-            9  =>   93882249,
-            10 =>   64151585,
-            11 =>   42976258,
-            12 =>   28217678,
-            13 =>   18153329,
-            14 =>   11439342,
-            15 =>    7058616,
-            16 =>    4263557,
-            17 =>    2520084,
-            18 =>    1457139,
-            19 =>     823907,
+            1  => 1_000_000_000,
+            2  =>   793_000_000,
+            3  =>   617_796_000,
+            4  =>   472_729_139,
+            5  =>   355_196_928,
+            6  =>   262_003_550,
+            7  =>   189_677_245,
+            8  =>   134_734_731,
+            9  =>    93_882_249,
+            10 =>    64_151_585,
+            11 =>    42_976_258,
+            12 =>    28_217_678,
+            13 =>    18_153_329,
+            14 =>    11_439_342,
+            15 =>     7_058_616,
+            16 =>     4_263_557,
+            17 =>     2_520_084,
+            18 =>     1_457_139,
+            19 =>       823_907, //TODO tweak curve so this matches 833_333 ?
             _ => unimplemented!(),
         })
     }
 
-    fn update(&mut self, interaction: Option<ButtonChange>, up_to: Instant) {
+    pub fn update(&mut self, interaction: Option<ButtonChange>, up_to: Instant) {
         todo!() // TODO Complete state machine.
         
         // Handle game over: return immediately
