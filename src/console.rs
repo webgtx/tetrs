@@ -1,6 +1,11 @@
-use crate::game_logic::Game;
-use std::{io::Write};
-use std::time::{Duration, Instant};
+use crate::game_logic::{Game, Gamemode};
+
+use std::{
+    num::NonZeroU64,
+    time::{Duration, Instant},
+    io::Write,
+};
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -9,148 +14,104 @@ use crossterm::{
     ExecutableCommand, QueueableCommand,
 };
 
-const REFRESH_PER_S: f64 = 180.0;
-const DRAW_RATE: u64 = 3; // 60fps
+const GAME_DRAW_RATE: u64 = 3; // 60fps
 
 struct Settings {
-    // TODO information stored throughout application
-}
-
-enum ScreenUpdate {
-    Remove,
-    Keep,
-    Add(Screen),
+    //TODO information stored throughout application?
 }
 
 enum Screen {
-    Main,
-    Options,
+    Title, //TODO Store selected gamemode or smth for the selection screen for convenience
     Gaming(Game),
+    Options,
 }
 
-impl Screen {
-    fn update(&self, settings: &mut Settings, time: Instant) -> std::io::Result<ScreenUpdate> {
-        match self {
-            Screen::Main => {
-                todo!() // TODO update_main(settings);
+enum ScreenChange {
+    Exit,
+    Keep,
+    Enter(Screen),
+}
+
+
+fn enter_title_screen(w: &mut dyn Write) -> std::io::Result<ScreenChange> {
+    return Ok(ScreenChange::Enter(Screen::Gaming(Game::new(Gamemode::endless()))));
+    /*TODO make title screen
+    while event::poll(Duration::from_secs(0))? {
+        match event::read()? {
+            // Abort
+            Event::Key(KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers: KeyModifiers::CONTROL,
+                    kind: KeyEventKind::Press,
+                    state: _}) => {
+                break 'update_loop
             }
-            Screen::Options => {
-                todo!() // TODO update_options(settings);
+            // Handle common key inputs
+            Event::Key(KeyEvent) => {
+                // TODO handle key inputs!
             }
-            Screen::Gaming(game) => {
-                game.update(settings, time)
+            Event::Resize(cols, rows) => {
+                // TODO handle resize
             }
+            // Console lost focus: Pause, re-enter update loop
+            Event::FocusLost => {
+                // TODO actively UNfocus application (requires flag)?
+                if let Screen::Gaming(_) = screen {
+                    active_screens.push(Screen::Options);
+                    continue 'update_loop
+                }
+            }
+            // Console gained focus: Do nothing, just let player continue
+            Event::FocusGained => { }
+            // NOTE We do not handle mouse events (yet?)
+            Event::Mouse(MouseEvent) => { }
+            // Ignore pasted text
+            Event::Paste(String) => { }
         }
-    }
-
-    fn draw(&self, w: &mut impl Write) -> std::io::Result<()> {
-        match self {
-            Screen::Main => {
-                todo!() // TODO draw_main(w);
-            }
-            Screen::Options => {
-                todo!() // TODO draw_options(w);
-            }
-            Screen::Gaming(g) => {
-                todo!() // TODO draw_game(w, g)
-            }
-        }
-    }
+    }*/
 }
 
-fn draw_main(w: &mut dyn Write) -> std::io::Result<()> {
-    todo!() // TODO implement drawing main screen
+fn enter_options(w: &mut dyn Write, settings: &mut Settings) -> std::io::Result<ScreenChange> {
+    //TODO implement options overlay
+    return Ok(ScreenChange::Exit);
 }
 
-fn draw_options(w: &mut dyn Write) -> std::io::Result<()> {
-    todo!() // TODO implement drawing options screen
-}
-
-fn draw_game(w: &mut dyn Write, g: &Game) -> std::io::Result<()> {
-    todo!() // TODO implement drawing game
-}
-
-fn update_main(settings: &Settings) -> std::io::Result<ScreenUpdate> {
-    todo!() // TODO implement handle main screen
-}
-
-fn update_options(settings: &mut Settings) -> std::io::Result<ScreenUpdate> {
-    todo!() // TODO implement handle options screen
+fn enter_game(w: &mut dyn Write, settings: &Settings, game: &mut Game) -> std::io::Result<ScreenChange> {
+    //TODO implement game loop!!
+    todo!("Ayo") 
 }
 
 pub fn run(w: &mut impl Write) -> std::io::Result<()> {
-    // Setup console
+    // Initialize console
     w.execute(terminal::EnterAlternateScreen)?;
-    // TODO support kitty someday w.execute(event::PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES))?;
+    //TODO use kitty someday w.execute(event::PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES))?;
     terminal::enable_raw_mode()?;
-
     // Prepare and run main update loop
     let mut settings = Settings {}; // Application settings
-    let mut active_screens = vec![Screen::Main]; // Active screens
-    'update_loop: for tick in 0u64.. {
-        let time_start = Instant::now();
-
-        // Retrieve active screen, stop application if all were dropped
-        let Some(screen) = active_screens.last() else {
+    let mut active_screens = vec![Screen::Title]; // Active screens
+    loop {
+        // Retrieve active screen, stop application if all exited
+        let Some(screen) = active_screens.last_mut() else {
             break;
         };
-
-        while event::poll(Duration::from_secs(0))? {
-            match event::read()? {
-                // Abort
-                Event::Key(KeyEvent {
-                        code: KeyCode::Char('c'),
-                        modifiers: KeyModifiers::CONTROL,
-                        kind: KeyEventKind::Press,
-                        state: _}) => {
-                    break 'update_loop
-                }
-                // Handle common key inputs
-                Event::Key(KeyEvent) => {
-                    // TODO handle key inputs!
-                }
-                Event::Resize(cols, rows) => {
-                    // TODO handle resize
-                }
-                // Console lost focus: Pause, re-enter update loop
-                Event::FocusLost => {
-                    // TODO actively UNfocus application (requires flag)?
-                    if let Screen::Gaming(_) = screen {
-                        active_screens.push(Screen::Options);
-                        continue 'update_loop
-                    }
-                }
-                // Console gained focus: Do nothing, just let player continue
-                Event::FocusGained => { }
-                // NOTE We do not handle mouse events (yet?)
-                Event::Mouse(MouseEvent) => { }
-                // Ignore pasted text
-                Event::Paste(String) => { }
-            }
+        // Enter screen until it returns what to do next
+        let update = match screen {
+            Screen::Title => enter_title_screen(w),
+            Screen::Options => enter_options(w, &mut settings),
+            Screen::Gaming(game) => enter_game(w, &settings, game),
+        }?;
+        // Change screen session depending on what response screen gave
+        match update {
+            ScreenChange::Exit => { active_screens.pop(); },
+            ScreenChange::Keep => { }
+            ScreenChange::Enter(new_screen) => { active_screens.push(new_screen); }
         }
-
-        // Update state
-        match screen.update(&mut settings, time_start)? {
-            ScreenUpdate::Remove => { active_screens.pop(); },
-            ScreenUpdate::Keep => { }
-            ScreenUpdate::Add(new_screen) => { active_screens.push(new_screen); }
-        }
-
-        // Possibly do draw this frame
-        if tick % DRAW_RATE == 0 {
-            screen.draw(w)?;
-        }
-
-        // Idle the remaining time of this frame
-        let delay = Duration::from_secs_f64(1.0 / REFRESH_PER_S);
-        let elapsed = Instant::now() - time_start;
-        std::thread::sleep(delay - elapsed);
     }
-    
+    // Deinitialize console
     w.execute(style::ResetColor)?;
     w.execute(cursor::Show)?;
     w.execute(terminal::LeaveAlternateScreen)?;
-    // TODO support kitty someday w.execute(event::PopKeyboardEnhancementFlags)?;
+    //TODO use kitty someday w.execute(event::PopKeyboardEnhancementFlags)?;
     terminal::disable_raw_mode()?;
     Ok(())
 }

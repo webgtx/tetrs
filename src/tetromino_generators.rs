@@ -136,3 +136,5 @@ impl Iterator for RecencyProbGen {
         Some(i.try_into().unwrap()) // Safety: 0 <= n <= 6
     }
 }
+
+// TODO NESRandomGen c.f. https://meatfighter.com/nintendotetrisai/#Spawning_Tetriminos
