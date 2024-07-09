@@ -338,7 +338,7 @@ impl Game {
         })
     }
 
-    pub fn update(&mut self, interaction: Option<ButtonChange>, up_to: Instant) {
+    pub fn update(&mut self, interaction: Option<ButtonChange>, up_to: Instant) -> Option<bool> {
         todo!() // TODO Complete state machine.
         
         // Handle game over: return immediately
