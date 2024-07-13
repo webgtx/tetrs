@@ -7,12 +7,13 @@ use std::{
 
 use crate::backend::{rotation_systems, tetromino_generators};
 
-pub type ButtonChange = ButtonMap<Option<bool>>;
+pub type ButtonsPressed = ButtonMap<bool>;
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 pub type Board = [[Option<TileTypeID>; Game::WIDTH]; Game::HEIGHT];
 pub type Coord = (usize, usize);
+pub type Offset = (isize, isize);
 pub type TileTypeID = u32;
-type EventMap<T> = BTreeMap<TimingEvent, T>;
+type EventMap<T> = BTreeMap<Event, T>;
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {
@@ -34,7 +35,11 @@ pub enum Tetromino {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
-pub(crate) struct ActivePiece(pub Tetromino, pub Orientation, pub Coord);
+pub(crate) struct ActivePiece {
+    pub shape: Tetromino,
+    pub orientation: Orientation,
+    pub pos: Coord,
+}
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 pub enum MeasureStat {
@@ -64,20 +69,20 @@ pub enum Button {
     RotateAround,
     DropSoft,
     DropHard,
-    Hold,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Default, Debug)]
-pub struct ButtonMap<T>(T, T, T, T, T, T, T, T);
+pub struct ButtonMap<T>(T, T, T, T, T, T, T);
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-enum TimingEvent {
+enum Event {
     Spawn,
-    GroundCap,
+    //GroundTimer, // TODO:
     Lock,
     HardDrop,
     SoftDrop,
     Move,
+    MoveRepeat,
     Rotate,
     Fall, // TODO: Fall timer gets reset upon manual drop.
 }
@@ -89,7 +94,7 @@ pub struct Game {
     // Game "state" fields.
     finish_status: Option<bool>,
     events: EventMap<Instant>,
-    buttons_pressed: ButtonMap<bool>,
+    buttons_pressed: ButtonsPressed,
     board: Board,
     active_piece: Option<ActivePiece>,
     next_pieces: VecDeque<Tetromino>,
@@ -100,7 +105,7 @@ pub struct Game {
     score: u64,
     // Game "settings" fields.
     mode: Gamemode,
-    piece_generator: Box<dyn Iterator<Item = Tetromino>>,
+    tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
     rotate_fn: rotation_systems::RotateFn,
     appearance_delay: Duration,
     delayed_auto_shift: Duration,
@@ -144,6 +149,45 @@ impl Orientation {
     }
 }
 
+impl Tetromino {
+    fn minos(&self, oriented: Orientation) -> [Coord; 4] {
+        use Orientation::*;
+        match self {
+            Tetromino::O => [(0, 0), (1, 0), (0, 1), (1, 1)], // ⠶
+            Tetromino::I => match oriented {
+                N | S => [(0, 0), (1, 0), (2, 0), (3, 0)], // ⠤⠤
+                E | W => [(0, 0), (0, 1), (0, 2), (0, 3)], // ⡇
+            },
+            Tetromino::S => match oriented {
+                N | S => [(0, 0), (1, 0), (1, 1), (2, 1)], // ⠴⠂
+                E | W => [(1, 0), (0, 1), (1, 1), (0, 2)], // ⠳
+            },
+            Tetromino::Z => match oriented {
+                N | S => [(1, 0), (2, 0), (0, 1), (1, 1)], // ⠲⠄
+                E | W => [(0, 0), (0, 1), (1, 1), (1, 2)], // ⠞
+            },
+            Tetromino::T => match oriented {
+                N => [(0, 0), (1, 0), (2, 0), (1, 1)], // ⠴⠄
+                E => [(0, 0), (0, 1), (1, 1), (0, 2)], // ⠗
+                S => [(1, 0), (0, 1), (1, 1), (2, 1)], // ⠲⠂
+                W => [(1, 0), (0, 1), (1, 1), (1, 2)], // ⠺
+            },
+            Tetromino::L => match oriented {
+                N => [(0, 0), (1, 0), (2, 0), (2, 1)], // ⠤⠆
+                E => [(0, 0), (1, 0), (0, 1), (0, 2)], // ⠧
+                S => [(0, 0), (0, 1), (1, 1), (2, 1)], // ⠖⠂
+                W => [(1, 0), (1, 1), (0, 2), (1, 2)], // ⠹
+            },
+            Tetromino::J => match oriented {
+                N => [(0, 0), (1, 0), (2, 0), (0, 1)], // ⠦⠄
+                E => [(0, 0), (0, 1), (0, 2), (1, 2)], // ⠏
+                S => [(2, 0), (0, 1), (1, 1), (2, 1)], // ⠒⠆
+                W => [(0, 0), (1, 0), (1, 1), (1, 2)], // ⠼
+            },
+        }
+    }
+}
+
 impl TryFrom<usize> for Tetromino {
     type Error = ();
 
@@ -163,48 +207,37 @@ impl TryFrom<usize> for Tetromino {
 
 impl ActivePiece {
     pub fn tiles(&self) -> [Coord; 4] {
-        let Self(shape, o, (x, y)) = self;
-        use Orientation::*;
-        match shape {
-            Tetromino::O => [(0, 0), (1, 0), (0, 1), (1, 1)], // ⠶
-            Tetromino::I => match o {
-                N | S => [(0, 0), (1, 0), (2, 0), (3, 0)], // ⠤⠤
-                E | W => [(0, 0), (0, 1), (0, 2), (0, 3)], // ⡇
-            },
-            Tetromino::S => match o {
-                N | S => [(0, 0), (1, 0), (1, 1), (2, 1)], // ⠴⠂
-                E | W => [(1, 0), (0, 1), (1, 1), (0, 2)], // ⠳
-            },
-            Tetromino::Z => match o {
-                N | S => [(1, 0), (2, 0), (0, 1), (1, 1)], // ⠲⠄
-                E | W => [(0, 0), (0, 1), (1, 1), (1, 2)], // ⠞
-            },
-            Tetromino::T => match o {
-                N => [(0, 0), (1, 0), (2, 0), (1, 1)], // ⠴⠄
-                E => [(0, 0), (0, 1), (1, 1), (0, 2)], // ⠗
-                S => [(1, 0), (0, 1), (1, 1), (2, 1)], // ⠲⠂
-                W => [(1, 0), (0, 1), (1, 1), (1, 2)], // ⠺
-            },
-            Tetromino::L => match o {
-                N => [(0, 0), (1, 0), (2, 0), (2, 1)], // ⠤⠆
-                E => [(0, 0), (1, 0), (0, 1), (0, 2)], // ⠧
-                S => [(0, 0), (0, 1), (1, 1), (2, 1)], // ⠖⠂
-                W => [(1, 0), (1, 1), (0, 2), (1, 2)], // ⠹
-            },
-            Tetromino::J => match o {
-                N => [(0, 0), (1, 0), (2, 0), (0, 1)], // ⠦⠄
-                E => [(0, 0), (0, 1), (0, 2), (1, 2)], // ⠏
-                S => [(2, 0), (0, 1), (1, 1), (2, 1)], // ⠒⠆
-                W => [(0, 0), (1, 0), (1, 1), (1, 2)], // ⠼
-            },
-        }
-        .map(|(dx, dy)| (x + dx, y + dy))
+        let Self {
+            shape,
+            orientation,
+            pos: (x, y),
+        } = self;
+        shape.minos(*orientation).map(|(dx, dy)| (x + dx, y + dy))
     }
 
     pub(crate) fn fits(&self, board: Board) -> bool {
         self.tiles()
             .iter()
             .all(|&(x, y)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
+    }
+
+    pub fn fits_at(&self, board: Board, offset: Offset) -> Option<ActivePiece> {
+        let mut new_piece = self.clone();
+        new_piece.pos = add(self.pos, offset)?;
+        new_piece.fits(board).then_some(new_piece)
+    }
+
+    pub(crate) fn first_fit(
+        &self,
+        board: Board,
+        offsets: impl IntoIterator<Item = Offset>,
+    ) -> Option<ActivePiece> {
+        let mut new_piece = self.clone();
+        let old_pos = self.pos;
+        offsets.into_iter().find_map(|offset| {
+            new_piece.pos = add(old_pos, offset)?;
+            new_piece.fits(board).then_some(new_piece)
+        })
     }
 }
 
@@ -284,7 +317,6 @@ impl<T> std::ops::Index<Button> for ButtonMap<T> {
             Button::RotateAround => &self.4,
             Button::DropSoft => &self.5,
             Button::DropHard => &self.6,
-            Button::Hold => &self.7,
         }
     }
 }
@@ -299,7 +331,6 @@ impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
             Button::RotateAround => &mut self.4,
             Button::DropSoft => &mut self.5,
             Button::DropHard => &mut self.6,
-            Button::Hold => &mut self.7,
         }
     }
 }
@@ -315,7 +346,7 @@ impl Game {
         let next_pieces = generator.by_ref().take(preview_size).collect();
         Game {
             finish_status: None,
-            events: BTreeMap::from([(TimingEvent::Spawn, time_started)]),
+            events: BTreeMap::from([(Event::Spawn, time_started)]),
             buttons_pressed: Default::default(),
             board: Default::default(),
             active_piece: None,
@@ -326,7 +357,7 @@ impl Game {
             lines_cleared: 0,
             score: 0,
             mode,
-            piece_generator: Box::new(generator),
+            tetromino_generator: Box::new(generator),
             rotate_fn: rotation_systems::rotate_classic,
             appearance_delay: Duration::from_millis(100),
             delayed_auto_shift: Duration::from_millis(300),
@@ -358,8 +389,7 @@ impl Game {
         self.finish_status
     }
 
-    // TODO: Take `self` and don't leave behind `Game` in finished state where `update` can be called but does nothing.
-    pub fn update(&mut self, interaction: Option<ButtonChange>, up_to: Instant) {
+    pub fn update(&mut self, mut new_button_state: Option<ButtonsPressed>, time: Instant) {
         // TODO: Complete state machine.
         // Handle game over: return immediately
         //
@@ -370,68 +400,176 @@ impl Game {
         // Update score (B2B?? Combos?? Perfect clears??)
         // Update level
         // Return desired next update
-
         if self.finish_status.is_some() {
             return;
         }
         loop {
-            // SAFETY: `Game` invariant guarantees there's some event.
-            let (event, time) = self.events.iter().min_by_key(|(_, &time)| time).unwrap();
-            // Next event would be beyond desired point in time up to which update is requested, break out.
-            if up_to < *time {
+            // SAFETY: `Game` invariants guarantee there's some event.
+            let (&event, _) = self
+                .events
+                .iter()
+                .min_by_key(|(&event, &time)| (time, event))
+                .unwrap();
+            // SAFETY: `event` key was given to use by the `.min` function.
+            let (event, event_time) = self.events.remove_entry(&event).unwrap();
+            // Next event beyond requested update time, process possible user input first or break out.
+            if time < event_time {
                 // Update button inputs
-                if let Some(button_change) = interaction {
-                    // TODO: Update `ButtonMap`.
-                    // Button::MoveLeft
-                    // Button::MoveRight
-                    // Button::RotateLeft
-                    // Button::RotateRight
-                    // Button::RotateAround
-                    // Button::Drop
-                    // Button::DropHard
-                    // Button::Hold
+                if let Some(buttons_pressed) = new_button_state.take() {
+                    self.handle_input(buttons_pressed, time);
+                } else {
+                    break;
                 }
-                break;
+            } else {
+                // Handle next in-game event.
+                self.handle_event(event, event_time);
             }
-            match event {
-                TimingEvent::Spawn => {
-                    assert!(
-                        self.active_piece.is_none(),
-                        "spawning a new piece while active piece is still in play"
-                    );
-                    let gen_tetromino = self
-                        .piece_generator
-                        .next()
-                        .expect("random piece generator ran out of values before end of game");
-                    let new_tetromino = if let Some(cached_tetromino) = self.next_pieces.pop_front()
-                    {
-                        self.next_pieces.push_back(gen_tetromino);
-                        cached_tetromino
-                    } else {
-                        gen_tetromino
-                    };
-                    let starting_location = match new_tetromino {
-                        Tetromino::O => todo!(),
-                        Tetromino::I => todo!(),
-                        Tetromino::S => todo!(),
-                        Tetromino::Z => todo!(),
-                        Tetromino::T => todo!(),
-                        Tetromino::L => todo!(),
-                        Tetromino::J => todo!(),
-                    };
-                    self.active_piece = Some(ActivePiece(
-                        new_tetromino,
-                        Orientation::N,
-                        starting_location,
-                    ));
+            // TODO Lock timer..
+            self.time_updated = event_time;
+        }
+    }
+
+    fn handle_input(&mut self, new_buttons_pressed: ButtonsPressed, time: Instant) {
+        let ButtonMap(mL0, mR0, rL0, rR0, rA0, dS0, dH0) = self.buttons_pressed;
+        let ButtonMap(mL1, mR1, rL1, rR1, rA1, dS1, dH1) = new_buttons_pressed;
+        /*
+        Table:                                 Karnaugh map:
+        | mL0 mR0 mL1 mR1                      |           !mL1 !mL1  mL1  mL1
+        |  0   0   0   0  :  -                 |           !mR1  mR1  mR1 !mR1
+        |  0   0   0   1  :  move, move (DAS)  | !mL0 !mR0   -   DAS   -   DAS
+        |  0   0   1   0  :  move, move (DAS)  | !mL0  mR0  rem   -   rem  ARR
+        |  0   0   1   1  :  -                 |  mL0  mR0   -   ARR   -   ARR
+        |  0   1   0   0  :  remove            |  mL0 !mR0  rem  ARR  rem   -
+        |  0   1   0   1  :  -
+        |  0   1   1   0  :  move, move (ARR)
+        |  0   1   1   1  :  remove
+        |  1   0   0   0  :  remove
+        |  1   0   0   1  :  move, move (ARR)
+        |  1   0   1   0  :  -
+        |  1   0   1   1  :  remove
+        |  1   1   0   0  :  -
+        |  1   1   0   1  :  move, move (ARR)
+        |  1   1   1   0  :  move, move (ARR)
+        |  1   1   1   1  :  -
+        */
+        // No buttons pressed -> one button pressed, add initial move.
+        if (!mL0 && !mR0) && (mL1 != mR1) {
+            self.events.insert(Event::Move, time);
+        // One/Two buttons pressed -> different/one button pressed, (re-)add fast repeat move.
+        } else if (mL0 && (!mL1 && mR1)) || (mR0 && (mL1 && !mR1)) {
+            self.events.remove(&Event::MoveRepeat);
+            self.events.insert(Event::MoveRepeat, time);
+        // Single button pressed -> both (un)pressed, remove future moves.
+        } else if (mL0 != mR0) && (mL1 == mR1) {
+            self.events.remove(&Event::MoveRepeat);
+        }
+        /*
+        Table:                       Karnaugh map:
+        | rL0 rR0 rL1 rR1            |           !rR1  rR1  rR1 !rR1
+        |  0   0   0   0  :  -       |           !rL1 !rL1  rL1  rL1
+        |  0   0   0   1  :  rotate  | !rL0 !rR0   -   rot   -   rot
+        |  0   0   1   0  :  rotate  | !rL0  rR0   -    -   rot  rot
+        |  0   0   1   1  :  -       |  rL0  rR0   -    -    -    -
+        |  0   1   0   0  :  -       |  rL0 !rR0   -   rot  rot   -
+        |  0   1   0   1  :  -
+        |  0   1   1   0  :  rotate
+        |  0   1   1   1  :  rotate
+        |  1   0   0   0  :  -
+        |  1   0   0   1  :  rotate
+        |  1   0   1   0  :  -
+        |  1   0   1   1  :  rotate
+        |  1   1   0   0  :  -
+        |  1   1   0   1  :  -
+        |  1   1   1   0  :  -
+        |  1   1   1   1  :  -
+        We rotate around (rA) if (!rA0 && rA1).
+        This always causes a rotation event (with no cancellation possible with rL,rR).
+        */
+        // Either a 180 rotation, or a single L/R rotation button was pressed.
+        if (!rA0 && rA1) || (((!rR0 && rR1) || (!rL0 && rL1)) && !(!rL0 && !rR0 && rR1 && rL1)) {
+            self.events.insert(Event::Rotate, time);
+        }
+        // Soft drop button pressed.
+        if !dS0 && dS1 {
+            self.events.insert(Event::SoftDrop, time);
+        }
+        // Hard drop button pressed.
+        if !dH0 && dH1 {
+            self.events.insert(Event::HardDrop, time);
+        }
+        self.buttons_pressed = new_buttons_pressed;
+    }
+
+    fn handle_event(&mut self, event: Event, time: Instant) {
+        match event {
+            Event::Spawn => {
+                // We generate a new piece above the skyline, and immediately queue a fall event for it
+                let gen_tetromino = self
+                    .tetromino_generator
+                    .next()
+                    .expect("random piece generator ran out of values before end of game");
+                let new_tetromino = if let Some(pregen_tetromino) = self.next_pieces.pop_front() {
+                    self.next_pieces.push_back(gen_tetromino);
+                    pregen_tetromino
+                } else {
+                    gen_tetromino
+                };
+                let start_pos = match new_tetromino {
+                    Tetromino::O => (4, 21),
+                    Tetromino::I => (3, 21),
+                    _ => (3, 21),
+                };
+                assert!(
+                    self.active_piece.is_none(),
+                    "spawning new piece while an active piece is still in play"
+                );
+                let new_piece = ActivePiece {
+                    shape: new_tetromino,
+                    orientation: Orientation::N,
+                    pos: start_pos,
+                };
+                self.active_piece = Some(new_piece);
+                self.events.insert(Event::Fall, time);
+            }
+            Event::Lock => {
+                // TODO: Oh no (this is a tricky part cuz of Line clearing, scoring, level up, ..).
+                todo!()
+            }
+            Event::HardDrop => {
+                let mut active_piece = self.active_piece.expect("hard-dropping none active piece");
+                // Move piece all the way down.
+                while let Some(piece_below) = active_piece.fits_at(self.board, (0, -1)) {
+                    active_piece = piece_below;
                 }
-                TimingEvent::GroundCap => todo!(),
-                TimingEvent::Lock => todo!(),
-                TimingEvent::HardDrop => todo!(),
-                TimingEvent::SoftDrop => todo!(),
-                TimingEvent::Move => todo!(),
-                TimingEvent::Rotate => todo!(),
-                TimingEvent::Fall => todo!(),
+                self.active_piece = Some(active_piece);
+                self.events.insert(Event::Lock, time + self.hard_drop_delay);
+            }
+            Event::SoftDrop | Event::Fall => {
+                let active_piece = self.active_piece.expect("dropping none active piece");
+                // Try to move active piece down.
+                if let Some(piece_below) = active_piece.fits_at(self.board, (0, -1)) {
+                    self.active_piece = Some(piece_below);
+                    let drop_delay = Duration::from_secs_f64(
+                        self.drop_delay().as_secs_f64() / self.soft_drop_factor,
+                    );
+                    self.events.insert(Event::Fall, time + drop_delay);
+                // Piece hit ground but SoftDrop was pressed.
+                } else if event == Event::SoftDrop {
+                    self.events.insert(Event::Lock, time);
+                // Piece hit ground and tries to drop naturally.
+                // TODO: Do Fall events get removed from queue here?
+                } else if event == Event::Fall {
+                    // TODO: Handle natural fall with immediate locking.
+                    todo!()
+                }
+            }
+            Event::Move | Event::MoveRepeat => {
+                // TODO: Handle immediate move and adding move repeat.
+                todo!()
+            }
+            Event::Rotate => {
+                // TODO: Handle cancelling L/R rotations and 180 rotation.
+                todo!()
             }
         }
     }
@@ -482,4 +620,8 @@ impl Game {
     fn ghost_piece(&self) -> Option<[Coord; 4]> {
         todo!() // TODO: Compute ghost piece.
     }
+}
+
+pub(crate) fn add((x0, y0): Coord, (x1, y1): Offset) -> Option<Coord> {
+    Some((x0.checked_add_signed(x1)?, y0.checked_add_signed(y1)?))
 }

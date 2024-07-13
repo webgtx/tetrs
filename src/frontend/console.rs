@@ -12,7 +12,7 @@ use crossterm::{
 };
 use device_query::{keymap::Keycode as dqKeyCode, DeviceEvents};
 
-use crate::backend::game::{Button, ButtonChange, Game, Gamemode};
+use crate::backend::game::{Button, ButtonsPressed, Game, Gamemode};
 
 const GAME_FPS: f64 = 60.0; // 60fps
 
@@ -123,6 +123,7 @@ impl Menu {
             };
             let _ = sx2.send(signal);
         });
+        let mut buttons_pressed = ButtonsPressed::default();
         // Game Loop
         let game_loop_start = Instant::now();
         for i in 1u32.. {
@@ -130,10 +131,9 @@ impl Menu {
             let frame_delay = next_frame - Instant::now();
             match rx.recv_timeout(frame_delay) {
                 Ok(None) => return Ok(MenuUpdate::Push(Menu::Pause)),
-                Ok(Some((button, is_press_down, instant))) => {
-                    let mut changes = ButtonChange::default();
-                    changes[button] = Some(is_press_down);
-                    game.update(Some(changes), instant)
+                Ok(Some((button, button_state, instant))) => {
+                    buttons_pressed[button] = button_state;
+                    game.update(Some(buttons_pressed), instant)
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
@@ -205,7 +205,7 @@ pub fn run(w: &mut impl Write) -> io::Result<String> {
         (dqKeyCode::A, Button::RotateLeft),
         //(dqKeyCode::S, Button::DropHard),
         (dqKeyCode::D, Button::RotateRight),
-        (dqKeyCode::Down, Button::Drop),
+        (dqKeyCode::Down, Button::DropSoft),
         (dqKeyCode::Up, Button::DropHard),
     ]);
     let mut settings = Settings { keybinds };

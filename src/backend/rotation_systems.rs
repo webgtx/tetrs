@@ -1,72 +1,58 @@
-use crate::backend::game::{ActivePiece, Board, Coord, Orientation, Tetromino};
+use crate::backend::game::{ActivePiece, Board, Orientation, Tetromino};
 
-pub type RotateFn = fn(board: Board, piece: ActivePiece, right_turns: i32) -> Option<ActivePiece>;
-type Offset = (isize, isize);
+pub type RotateFn = fn(piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece>;
 
-fn add((x0, y0): Coord, (x1, y1): Offset) -> Option<Coord> {
-    Some((x0.checked_add_signed(x1)?, y0.checked_add_signed(y1)?))
+#[allow(dead_code)]
+pub fn rotate_dummy(mut piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece> {
+    piece.orientation = piece.orientation.rotate_r(right_turns);
+    piece.fits_at(board, (0, 0))
 }
 
-fn first_valid_kick(
+#[allow(dead_code)]
+pub fn rotate_classic(
+    mut piece: ActivePiece,
     board: Board,
-    old_piece: ActivePiece,
     right_turns: i32,
-    kicks: impl IntoIterator<Item = Offset>,
 ) -> Option<ActivePiece> {
-    let ActivePiece(shape, o, pos) = old_piece;
-    kicks.into_iter().find_map(|offset| {
-        let new_piece = ActivePiece(shape, o.rotate_r(right_turns), add(pos, offset)?);
-        if new_piece.fits(board) {
-            Some(new_piece)
-        } else {
-            None
-        }
-    })
-}
-
-#[allow(dead_code)]
-pub fn rotate_dummy(board: Board, piece: ActivePiece, right_turns: i32) -> Option<ActivePiece> {
-    first_valid_kick(board, piece, right_turns, std::iter::once((0, 0)))
-}
-
-#[allow(dead_code)]
-pub fn rotate_classic(board: Board, piece: ActivePiece, right_turns: i32) -> Option<ActivePiece> {
-    let ActivePiece(shape, o, _pos) = piece;
     let right = match right_turns.rem_euclid(4) {
-        // No rotation.
+        // No rotation occurred.
         0 => return Some(piece),
         // One right rotation.
         1 => true,
-        // Classic didn't define 180 rotation, just put some default 180 rotation.
-        2 => return first_valid_kick(board, piece, 2, std::iter::once((0, 0))),
+        // Classic didn't define 180 rotation, just check if the "default" 180 rotation fits.
+        2 => {
+            piece.orientation = piece.orientation.rotate_r(right_turns);
+            return piece.fits_at(board, (0, 0));
+        }
         // One left rotation.
         3 => false,
         _ => unreachable!(),
     };
     use Orientation::*;
     #[rustfmt::skip]
-    let kick = match shape {
+    let offset = match piece.shape {
         Tetromino::O => (0, 0), // ⠶
-        Tetromino::I => match o {
+        Tetromino::I => match piece.orientation {
             N | S => (2, -1), // ⠤⠤ -> ⡇
             E | W => (-2, 1), // ⡇  -> ⠤⠤
         },
-        Tetromino::S | Tetromino::Z => match o {
+        Tetromino::S | Tetromino::Z => match piece.orientation {
             N | S => (1, 0),  // ⠴⠂ -> ⠳  // ⠲⠄ -> ⠞
             E | W => (-1, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
         },
-        Tetromino::T | Tetromino::L | Tetromino::J => match o {
+        Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
             N => if right { (1, -1) } else { (-1, 1) } // ⠴⠄ <-> ⠗  // ⠤⠆ <-> ⠧  // ⠦⠄ <-> ⠏
             E => if right { (-1, 0) } else { (1, 0) }  // ⠗  <-> ⠲⠂ // ⠧  <-> ⠖⠂ // ⠏  <-> ⠒⠆
             S => (0, 0),                               // ⠲⠂ <-> ⠺  // ⠖⠂ <-> ⠹  // ⠒⠆ <-> ⠼
             W => if right { (0, 1) } else { (0, -1) }  // ⠺  <-> ⠴⠄ // ⠹  <-> ⠤⠆ // ⠼  <-> ⠦⠄
         },
     };
-    first_valid_kick(board, piece, right_turns, std::iter::once(kick))
+    piece.orientation = piece.orientation.rotate_r(right_turns);
+    piece.fits_at(board, offset)
 }
 
-/* TODO: Improve and implement the 'Leaning' Rotation System.
-pub fn rotate_leaning(board: Board, piece: ActivePiece, right_turns: i32) -> Option<ActivePiece> {
+/* TODO: Improve and implement the 'Okay' Rotation System.
+pub fn rotate_okay(piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece> {
     let ActivePiece(shape, o, pos) = piece;
     let r = match right_turns.rem_euclid(4) {
         0 => return Some(piece),
