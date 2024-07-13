@@ -96,20 +96,27 @@ enum GameOverError {
 
 // TODO: `#[derive(Debug)]`.
 pub struct Game {
-    // INVARIANT: `finish_status.is_some() || !next_events.is_empty()`, "Until the game has finished there will always be more events".
-    // INVARIANT: `self.next_pieces().size()` stays constant.
     // Game "state" fields.
     finish_status: Option<bool>,
+    /// Invariants:
+    /// * Until the game has finished there will always be more events: `finish_status.is_some() || !next_events.is_empty()`.
+    /// * Unhandled events lie in the future: `for (event,event_time) in self.events { assert(self.time_updated < event_time); }`.
     events: EventMap<Instant>,
     buttons_pressed: ButtonsPressed,
     board: Board,
     active_piece: Option<ActivePiece>,
+    /// Invariants:
+    /// * The Preview size stays constant: `self.next_pieces().size() == old(self.next_pieces().size())`.
     next_pieces: VecDeque<Tetromino>,
+    /// Invariants:
+    /// * The Preview size stays constant: `self.next_pieces().size() == old(self.next_pieces().size())`.
     time_started: Instant,
     time_updated: Instant,
-    level: u64, // TODO: Make this into NonZeroU64 or explicitly allow level 0.
+    pieces_played: u64,
     lines_cleared: u64,
+    level: u64, // TODO: Make this into NonZeroU64 or explicitly allow level 0.
     score: u64,
+
     // Game "settings" fields.
     gamemode: Gamemode,
     tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
@@ -229,7 +236,7 @@ impl ActivePiece {
     }
 
     pub fn fits_at(&self, board: Board, offset: Offset) -> Option<ActivePiece> {
-        let mut new_piece = self.clone();
+        let mut new_piece = *self;
         new_piece.pos = add(self.pos, offset)?;
         new_piece.fits(board).then_some(new_piece)
     }
@@ -239,7 +246,7 @@ impl ActivePiece {
         board: Board,
         offsets: impl IntoIterator<Item = Offset>,
     ) -> Option<ActivePiece> {
-        let mut new_piece = self.clone();
+        let mut new_piece = *self;
         let old_pos = self.pos;
         offsets.into_iter().find_map(|offset| {
             new_piece.pos = add(old_pos, offset)?;
@@ -249,6 +256,7 @@ impl ActivePiece {
 }
 
 impl Gamemode {
+    #[allow(dead_code)]
     pub const fn custom(
         name: String,
         start_level: NonZeroU64,
@@ -266,6 +274,7 @@ impl Gamemode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn sprint(start_level: NonZeroU64) -> Self {
         let start_level = start_level.get();
         Self {
@@ -277,6 +286,7 @@ impl Gamemode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn ultra(start_level: NonZeroU64) -> Self {
         let start_level = start_level.get();
         Self {
@@ -288,6 +298,7 @@ impl Gamemode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn marathon() -> Self {
         Self {
             name: String::from("Marathon"),
@@ -298,13 +309,14 @@ impl Gamemode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn endless() -> Self {
         Self {
             name: String::from("Endless"),
             start_level: 1,
             increase_level: true,
             limit: None,
-            optimize: MeasureStat::Score(0),
+            optimize: MeasureStat::Pieces(0),
         }
     }
     // TODO: Gamemode pub fn master() -> Self : 20G gravity mode...
@@ -360,8 +372,9 @@ impl Game {
             next_pieces,
             time_started,
             time_updated: time_started,
-            level: mode.start_level,
+            pieces_played: 0,
             lines_cleared: 0,
+            level: mode.start_level,
             score: 0,
             gamemode: mode,
             tetromino_generator: Box::new(generator),
@@ -402,7 +415,7 @@ impl Game {
             return;
         }
         // We linearly process all events until we reach the update time.
-        loop {
+        'work_through_events: loop {
             // SAFETY: `Game` invariants guarantee there's some event.
             let (&event, _) = self
                 .events
@@ -411,30 +424,46 @@ impl Game {
                 .unwrap();
             // SAFETY: `event` key was given to use by the `.min` function.
             let (event, event_time) = self.events.remove_entry(&event).unwrap();
-            // Next event beyond requested update time, process/add possible user input events now or break out.
-            if time < event_time {
-                // Update button inputs
-                if let Some(buttons_pressed) = new_button_state.take() {
-                    self.process_input(buttons_pressed, time);
-                } else {
-                    break;
-                }
-                self.time_updated = time;
-            } else {
+            debug_assert!(
+                self.time_updated <= event_time,
+                "handling event lying in the past"
+            );
+            // Next event within requested update time, handle event first.
+            if event_time <= time {
                 // Handle next in-game event.
                 let result = self.handle_event(event, event_time);
                 self.time_updated = event_time;
                 match result {
                     Ok(()) => {}
-                    // Piece Placement - Game Over.
+                    // Game Over.
                     Err(GameOverError::BlockOut | GameOverError::LockOut) => {
                         self.finish_status = Some(false);
-                        return;
+                        break 'work_through_events;
                     }
                 }
                 // Check if game completed
                 if let Some(limit) = self.gamemode.limit {
-                    // TODO: match on limit..
+                    let goal_achieved = match limit {
+                        MeasureStat::Lines(lines) => lines <= self.lines_cleared,
+                        MeasureStat::Level(level) => level <= self.level,
+                        MeasureStat::Score(score) => score <= self.score,
+                        MeasureStat::Pieces(pieces) => pieces <= self.pieces_played,
+                        MeasureStat::Time(timer) => timer <= self.time_updated - self.time_started,
+                    };
+                    if goal_achieved {
+                        self.finish_status = Some(true);
+                        break 'work_through_events;
+                    }
+                }
+            // Possibly process user input events now or break out.
+            } else {
+                // NOTE: We should be able to update the time here because `self.process_input(...)` does not access it.
+                self.time_updated = time;
+                // Update button inputs
+                if let Some(buttons_pressed) = new_button_state.take() {
+                    self.process_input(buttons_pressed, time);
+                } else {
+                    break 'work_through_events;
                 }
             }
             // Update locking state of active piece
@@ -445,7 +474,9 @@ impl Game {
     }
 
     fn process_input(&mut self, new_buttons_pressed: ButtonsPressed, time: Instant) {
+        #[allow(non_snake_case)]
         let ButtonMap(mL0, mR0, rL0, rR0, rA0, dS0, dH0) = self.buttons_pressed;
+        #[allow(non_snake_case)]
         let ButtonMap(mL1, mR1, rL1, rR1, rA1, dS1, dH1) = new_buttons_pressed;
         /*
         Table:                                 Karnaugh map:
@@ -501,7 +532,7 @@ impl Game {
         This always causes a rotation event (with no cancellation possible with rL,rR).
         */
         // Either a 180 rotation, or a single L/R rotation button was pressed.
-        if (!rA0 && rA1) || (((!rR0 && rR1) || (!rL0 && rL1)) && !(!rL0 && !rR0 && rR1 && rL1)) {
+        if (!rA0 && rA1) || (((!rR0 && rR1) || (!rL0 && rL1)) && (rL0 || rR0 || !rR1 || !rL1)) {
             self.events.insert(Event::Rotate, time);
         }
         // Soft drop button pressed.
@@ -574,6 +605,7 @@ impl Game {
                 };
                 self.active_piece = Some(new_piece);
                 if new_piece.fits(self.board) {
+                    self.pieces_played += 1;
                     self.events.insert(Event::Fall, time);
                 // Newly spawned piece conflicts with board - Game over!
                 } else {
@@ -627,8 +659,12 @@ impl Game {
                 if let Some(moved_piece) = active_piece.fits_at(self.board, (0, dx)) {
                     self.active_piece = Some(moved_piece);
                 }
-                self.events
-                    .insert(Event::MoveRepeat, time + self.auto_repeat_rate);
+                let delay = if event == Event::MoveInitial {
+                    self.delayed_auto_shift
+                } else {
+                    self.auto_repeat_rate
+                };
+                self.events.insert(Event::MoveRepeat, time + delay);
             }
             Event::Rotate => {
                 let active_piece = self.active_piece.expect("moving none active piece");
