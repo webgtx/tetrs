@@ -1,6 +1,7 @@
 // TODO: Too many (unnecessary) derives for all the structs?
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     num::{NonZeroU32, NonZeroU64},
     time::{Duration, Instant},
 };
@@ -88,7 +89,6 @@ struct LockingData {
 enum Event {
     LineClearDelayUp,
     Spawn,
-    //GroundTimer, // TODO:
     Lock,
     LockTimer,
     HardDrop,
@@ -96,7 +96,7 @@ enum Event {
     MoveInitial,
     MoveRepeat,
     Rotate,
-    Fall, // TODO: Fall timer gets reset upon manual drop.
+    Fall,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
@@ -106,7 +106,6 @@ enum GameOverError {
 }
 
 /// TODO: Documentation. "Does not query time anywhere, it's the user's responsibility to handle time correctly."
-// TODO: `#[derive(Debug)]`.
 pub struct Game {
     // Game "state" fields.
     finished: Option<bool>,
@@ -151,8 +150,7 @@ pub struct GameState<'a> {
     pub lines_cleared: &'a Vec<Line>,
     pub level: u64,
     pub score: u64,
-    pub time_started: Instant,
-    pub time_updated: Instant,
+    pub time_elapsed: Duration,
     pub board: &'a Board,
     pub active_piece: Option<ActivePiece>,
     pub next_pieces: &'a VecDeque<Tetromino>,
@@ -164,6 +162,7 @@ pub enum VisualEvent {
     LineClears(Vec<usize>),
     HardDrop(ActivePiece, ActivePiece),
     Accolade(Tetromino, bool, u64, u64, bool),
+    Debug(String),
 }
 
 impl Orientation {
@@ -273,19 +272,22 @@ impl From<Tetromino> for usize {
 }
 
 impl ActivePiece {
-    pub fn tiles(&self) -> [Coord; 4] {
+    pub fn tiles(&self) -> [(Coord, TileTypeID); 4] {
         let Self {
             shape,
             orientation,
             pos: (x, y),
         } = self;
-        shape.minos(*orientation).map(|(dx, dy)| (x + dx, y + dy))
+        let tile_type_id = shape.tiletypeid();
+        shape
+            .minos(*orientation)
+            .map(|(dx, dy)| ((x + dx, y + dy), tile_type_id))
     }
 
     pub(crate) fn fits(&self, board: &Board) -> bool {
         self.tiles()
             .iter()
-            .all(|&(x, y)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
+            .all(|&((x, y), _)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
     }
 
     pub fn fits_at(&self, board: &Board, offset: Offset) -> Option<ActivePiece> {
@@ -416,6 +418,36 @@ impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
     }
 }
 
+impl fmt::Debug for Game {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("Game")
+            .field("finished", &self.finished)
+            .field("events", &self.events)
+            .field("buttons_pressed", &self.buttons_pressed)
+            .field("board", &self.board)
+            .field("active_piece_data", &self.active_piece_data)
+            .field("next_pieces", &self.next_pieces)
+            .field("time_started", &self.time_started)
+            .field("time_updated", &self.time_updated)
+            .field("pieces_played", &self.pieces_played)
+            .field("lines_cleared", &self.lines_cleared)
+            .field("level", &self.level)
+            .field("score", &self.score)
+            .field("consecutive_line_clears", &self.consecutive_line_clears)
+            .field("gamemode", &self.gamemode)
+            .field("tetromino_generator", &"PLACEHOLDER") // TODO: Better debug?
+            .field("rotate_fn", &self.rotate_fn)
+            .field("appearance_delay", &self.appearance_delay)
+            .field("delayed_auto_shift", &self.delayed_auto_shift)
+            .field("auto_repeat_rate", &self.auto_repeat_rate)
+            .field("soft_drop_factor", &self.soft_drop_factor)
+            .field("hard_drop_delay", &self.hard_drop_delay)
+            .field("ground_time_cap", &self.ground_time_cap)
+            .field("line_clear_delay", &self.line_clear_delay)
+            .finish()
+    }
+}
+
 impl Game {
     pub const HEIGHT: usize = 27;
     pub const WIDTH: usize = 10;
@@ -470,8 +502,9 @@ impl Game {
             lines_cleared: &self.lines_cleared,
             level: self.level,
             score: self.score,
-            time_started: self.time_started,
-            time_updated: self.time_updated,
+            time_elapsed: self
+                .time_updated
+                .saturating_duration_since(self.time_started),
         }
     }
 
@@ -542,7 +575,9 @@ impl Game {
                 self.time_updated = update_time;
                 // Update button inputs.
                 if let Some(buttons_pressed) = new_button_state.take() {
-                    self.process_input(buttons_pressed, update_time);
+                    if self.active_piece_data.is_some() {
+                        self.process_input(buttons_pressed, update_time);
+                    }
                 } else {
                     break 'work_through_events;
                 }
@@ -616,10 +651,8 @@ impl Game {
         // Soft drop button pressed.
         if !dS0 && dS1 {
             self.events.insert(Event::SoftDrop, update_time);
-        // Soft drop button released, reset drop delay immediately.
-        } else if dS0 && !dS1 {
-            self.events
-                .insert(Event::Fall, update_time + self.drop_delay());
+            // TODO: Fix the below? Note: causes issues with Crossterm / standard console inputs.
+            // Soft drop button released, reset drop delay immediately.
         }
         // Hard drop button pressed.
         if !dH0 && dH1 {
@@ -635,6 +668,11 @@ impl Game {
     ) -> Result<Vec<(Instant, VisualEvent)>, GameOverError> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut visual_events = Vec::new();
+        // TODO: Remove debug.
+        visual_events.push((
+            event_time,
+            VisualEvent::Debug(format!("{event:?} at {event_time:?}")),
+        ));
         match event {
             Event::LineClearDelayUp => {
                 self.events
@@ -653,9 +691,9 @@ impl Game {
                     gen_tetromino
                 };
                 let start_pos = match new_tetromino {
-                    Tetromino::O => (4, 21),
-                    Tetromino::I => (3, 21),
-                    _ => (3, 21),
+                    Tetromino::O => (4, 20),
+                    Tetromino::I => (3, 20),
+                    _ => (3, 20),
                 };
                 debug_assert!(
                     self.active_piece_data.is_none(),
@@ -689,7 +727,7 @@ impl Game {
                 if active_piece
                     .tiles()
                     .iter()
-                    .any(|(_, y)| *y >= Self::SKYLINE)
+                    .any(|((_, y), _)| *y >= Self::SKYLINE)
                 {
                     return Err(GameOverError::LockOut);
                 }
@@ -697,9 +735,8 @@ impl Game {
                 // Pre-save whether piece was spun into lock position.
                 let spin = active_piece.fits_at(&self.board, (0, 1)).is_none();
                 // Locking.
-                let minotype = active_piece.shape.tiletypeid();
-                for (x, y) in active_piece.tiles() {
-                    self.board[y][x] = Some(minotype);
+                for ((x, y), tile_type_id) in active_piece.tiles() {
+                    self.board[y][x] = Some(tile_type_id);
                 }
                 // Handle line clearing.
                 let mut lines_cleared = Vec::<usize>::with_capacity(4);
@@ -712,16 +749,16 @@ impl Game {
                         lines_cleared.push(y);
                     }
                 }
-                if !lines_cleared.is_empty() {
+                let n_lines_cleared = u64::try_from(lines_cleared.len()).unwrap();
+                if n_lines_cleared > 0 {
                     let n_tiles_used = u64::try_from(
                         active_piece
                             .tiles()
                             .iter()
-                            .filter(|(_, y)| lines_cleared.contains(y))
+                            .filter(|((_, y), _)| lines_cleared.contains(y))
                             .count(),
                     )
                     .unwrap();
-                    let n_lines_cleared = u64::try_from(lines_cleared.len()).unwrap();
                     visual_events.push((event_time, VisualEvent::LineClears(lines_cleared)));
                     self.consecutive_line_clears += 1;
                     // Add score bonus.
@@ -753,8 +790,13 @@ impl Game {
                 }
                 // Clear all events and only put in line clear delay.
                 self.events.clear();
-                self.events
-                    .insert(Event::LineClearDelayUp, event_time + self.line_clear_delay);
+                if n_lines_cleared > 0 {
+                    self.events
+                        .insert(Event::LineClearDelayUp, event_time + self.line_clear_delay);
+                } else {
+                    self.events
+                        .insert(Event::Spawn, event_time + self.appearance_delay);
+                }
             }
             Event::LockTimer => {
                 self.events.insert(Event::Lock, event_time);
@@ -773,10 +815,12 @@ impl Game {
                 self.events
                     .insert(Event::LockTimer, event_time + self.hard_drop_delay);
             }
-            Event::SoftDrop | Event::Fall => {
-                let drop_delay = Duration::from_secs_f64(
-                    self.drop_delay().as_secs_f64() / self.soft_drop_factor,
-                );
+            Event::Fall | Event::SoftDrop => {
+                let drop_delay = if event == Event::SoftDrop {
+                    Duration::from_secs_f64(self.drop_delay().as_secs_f64() / self.soft_drop_factor)
+                } else {
+                    self.drop_delay()
+                };
                 let Some((active_piece, _)) = self.active_piece_data.as_mut() else {
                     unreachable!("dropping none active piece")
                 };
@@ -788,7 +832,7 @@ impl Game {
                 } else if event == Event::SoftDrop {
                     self.events.insert(Event::Lock, event_time);
                 // Piece hit ground and tried to drop naturally: don't do anything but try falling again later.
-                } else if event == Event::Fall {
+                } else {
                     // TODO: Is this enough? Does this lead to inconsistent gameplay and should `Fall` be inserted outside together with locking?
                     self.events.insert(Event::Fall, event_time + drop_delay);
                 }
@@ -803,7 +847,7 @@ impl Game {
                 } else {
                     1
                 };
-                if let Some(moved_piece) = active_piece.fits_at(&self.board, (0, dx)) {
+                if let Some(moved_piece) = active_piece.fits_at(&self.board, (dx, 0)) {
                     *active_piece = moved_piece;
                 }
                 let move_delay = if event == Event::MoveInitial {
@@ -892,9 +936,9 @@ impl Game {
                     *last_liftoff = event_time;
                     self.events.remove(&Event::LockTimer);
                 }
-                // (Re)schedule lock timer if just landed or upon move/rotate.
+                // (Re)schedule lock timer if it's on the ground without a timer, or upon move/rotate.
                 if touches_ground_after
-                    && (!*touches_ground
+                    && (!self.events.contains_key(&Event::LockTimer)
                         || event == Event::MoveInitial
                         || event == Event::MoveRepeat
                         || event == Event::Rotate)

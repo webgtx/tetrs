@@ -1,8 +1,10 @@
 mod backend;
 mod frontend;
 
+use frontend::terminal;
+
 fn main() -> Result<(), std::io::Error> {
-    let msg = frontend::console::run(&mut std::io::stdout())?;
+    let msg = terminal::run(&mut std::io::stdout())?;
     println!("{msg}");
     Ok(())
 }

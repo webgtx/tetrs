@@ -45,10 +45,10 @@ pub fn rotate_classic(
             E | W => (-1, 0), // ⠳  -> ⠴⠂ // ⠞  -> ⠲⠄
         },
         Tetromino::T | Tetromino::L | Tetromino::J => match piece.orientation {
-            N => if right { (1, -1) } else { (-1, 1) } // ⠴⠄ <-> ⠗  // ⠤⠆ <-> ⠧  // ⠦⠄ <-> ⠏
-            E => if right { (-1, 0) } else { (1, 0) }  // ⠗  <-> ⠲⠂ // ⠧  <-> ⠖⠂ // ⠏  <-> ⠒⠆
-            S => (0, 0),                               // ⠲⠂ <-> ⠺  // ⠖⠂ <-> ⠹  // ⠒⠆ <-> ⠼
-            W => if right { (0, 1) } else { (0, -1) }  // ⠺  <-> ⠴⠄ // ⠹  <-> ⠤⠆ // ⠼  <-> ⠦⠄
+            N => if right { (1, -1) } else { (0, -1) } // ⠺  <- ⠴⠄ -> ⠗  // ⠤⠆ <-> ⠧  // ⠦⠄ <-> ⠏
+            E => if right { (-1, 0) } else { (-1, 1) }  // ⠴⠄ <- ⠗  -> ⠲⠂ // ⠧  <-> ⠖⠂ // ⠏  <-> ⠒⠆
+            S => if right { (0, 0) } else { (1, 0) },  // ⠗  <- ⠲⠂ -> ⠺  // ⠖⠂ <-> ⠹  // ⠒⠆ <-> ⠼
+            W => if right { (0, 1) } else { (0, 0) }         // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠹  <-> ⠤⠆ // ⠼  <-> ⠦⠄
         },
     };
     piece.orientation = piece.orientation.rotate_r(right_turns);

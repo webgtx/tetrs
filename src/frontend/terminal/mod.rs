@@ -1,27 +1,29 @@
+pub mod input_handlers;
+
 use std::{
-    collections::HashMap,
-    fmt::{self, format},
+    collections::{HashMap, VecDeque},
     io::{self, Write},
+    num::NonZeroU64,
     sync::mpsc,
     time::{Duration, Instant},
 };
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode as ctKeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     style, terminal, ExecutableCommand, QueueableCommand,
 };
-use device_query::{keymap::Keycode as dqKeyCode, DeviceEvents};
+use input_handlers::{new_input_handler_crossterm, ButtonSignal, CT_Keycode, DQ_Keycode};
 
 use crate::backend::game::{
-    Button, ButtonsPressed, Game, GameState, Gamemode, TileTypeID, VisualEvent,
+    Button, ButtonsPressed, Game, GameState, Gamemode, MeasureStat, VisualEvent,
 };
 
-const GAME_FPS: f64 = 60.0; // 60fps
-
-#[derive(Eq, PartialEq, Clone, Debug)]
+// TODO: Is `PartialEq` needed?
+#[derive(PartialEq, Clone, Debug)]
 struct Settings {
-    keybinds: HashMap<dqKeyCode, Button>,
+    game_fps: f64,
+    keybinds: HashMap<CT_Keycode, Button>,
     // TODO: What's the information stored throughout the entire application?
 }
 
@@ -49,7 +51,7 @@ enum MenuUpdate {
 
 impl Menu {
     fn title(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!()
+        todo!("title screen")
         /* TODO:
         while event::poll(Duration::from_secs(0))? {
             match event::read()? {
@@ -87,7 +89,7 @@ impl Menu {
     }
 
     fn newgame(w: &mut dyn Write, gamemode: &mut Gamemode) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("new game screen") // TODO:
     }
 
     fn game(
@@ -100,104 +102,98 @@ impl Menu {
         let time_unpaused = Instant::now();
         *duration_paused_total += time_unpaused.saturating_duration_since(*time_paused);
         // Prepare channel with which to communicate `Button` inputs / game interrupt.
-        let (sx1, rx) = mpsc::channel();
-        let sx2 = sx1.clone();
-        // TODO: Use Crossterm input: use `Settings` struct to store this decision.
-        let keybinds1 = std::sync::Arc::new(settings.keybinds.clone());
-        let keybinds2 = keybinds1.clone();
-        // Initialize callbacks which send `Button` inputs.
-        let device_state = device_query::DeviceState::new();
-        let _guard1 = device_state.on_key_down(move |key| {
-            let instant = Instant::now();
-            let signal = match key {
-                // Escape pressed: send interrupt.
-                dqKeyCode::Escape => None,
-                _ => match keybinds1.get(key) {
-                    // Button pressed with no binding: ignore.
-                    None => return,
-                    // Button pressed with binding.
-                    Some(&button) => Some((button, true, instant)),
-                },
-            };
-            let _ = sx1.send(signal);
-        });
-        let _guard2 = device_state.on_key_up(move |key| {
-            let instant = Instant::now();
-            let signal = match key {
-                // Escape released: ignore.
-                dqKeyCode::Escape => return,
-                _ => match keybinds2.get(key) {
-                    // Button pressed with no binding: ignore.
-                    None => return,
-                    // Button released with binding.
-                    Some(&button) => Some((button, false, instant)),
-                },
-            };
-            let _ = sx2.send(signal);
-        });
         let mut buttons_pressed = ButtonsPressed::default();
+        let (tx, rx) = mpsc::channel::<ButtonSignal>();
+        let _input_handler = new_input_handler_crossterm(&tx, &settings.keybinds);
+        // TODO: Remove these debug structs.
+        let mut vis_evt_msg_buf = VecDeque::new();
         // Game Loop
-        let loop_start = Instant::now();
-        let it = 1u32;
-        let menu_update = loop {
-            let next_frame = loop_start + Duration::from_secs_f64(f64::from(it) / GAME_FPS);
-            let frame_delay = next_frame - Instant::now();
-            let visual_events = match rx.recv_timeout(frame_delay) {
-                Ok(None) => break MenuUpdate::Push(Menu::Pause),
-                Ok(Some((button, button_state, instant))) => {
-                    buttons_pressed[button] = button_state;
-                    game.update(Some(buttons_pressed), instant - *duration_paused_total)
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let now = Instant::now();
-                    game.update(None, now - *duration_paused_total)
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    unreachable!("game loop RecvTimeoutError::Disconnected")
-                }
-            };
+        let time_render_loop_start = Instant::now();
+        let mut it = 0u32;
+        let next_menu = 'render_loop: loop {
+            it += 1;
+            let next_frame =
+                time_render_loop_start + Duration::from_secs_f64(f64::from(it) / settings.game_fps);
+            let mut new_visual_events = Vec::new();
+            'idle_loop: loop {
+                let frame_idle_remaining = next_frame - Instant::now();
+                match rx.recv_timeout(frame_idle_remaining) {
+                    Ok(None) => {
+                        // TODO: Remove.
+                        return Ok(MenuUpdate::Push(Menu::Quit(
+                            "[temporary but graceful game end - goodbye]".to_string(),
+                        )));
+                        break 'render_loop MenuUpdate::Push(Menu::Pause);
+                    }
+                    Ok(Some((instant, button, button_state))) => {
+                        buttons_pressed[button] = button_state;
+                        let update_visual_events =
+                            game.update(Some(buttons_pressed), instant - *duration_paused_total);
+                        new_visual_events.extend(update_visual_events);
+                        continue 'idle_loop;
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let now = Instant::now();
+                        let update_visual_events = game.update(None, now - *duration_paused_total);
+                        new_visual_events.extend(update_visual_events);
+                        break 'idle_loop;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        // TODO: SAFETY?
+                        unreachable!("game loop RecvTimeoutError::Disconnected");
+                    }
+                };
+            }
             // TODO: Draw game.
             let GameState {
                 gamemode,
                 lines_cleared,
                 level,
                 score,
-                time_started,
-                time_updated,
+                time_elapsed,
                 board,
                 active_piece,
                 next_pieces,
             } = game.state();
+            let mut temp_board = board.clone();
+            if let Some(active_piece) = active_piece {
+                for ((x, y), tile_type_id) in active_piece.tiles() {
+                    temp_board[y][x] = Some(tile_type_id);
+                }
+            }
             w.queue(terminal::Clear(terminal::ClearType::All))?
                 .queue(cursor::MoveTo(0, 0))?;
-            // TODO: Make proper function.
-            let fmt_cell = |cell: Option<TileTypeID>| {
-                cell.map_or("  ", |mino| match mino.get() {
-                    0 => "OO",
-                    1 => "II",
-                    2 => "SS",
-                    3 => "ZZ",
-                    4 => "TT",
-                    5 => "LL",
-                    6 => "JJ",
-                    _ => todo!("formatting unknown mino type"),
-                })
-            };
-            for line in board {
-                let fmt_line = line
-                    .iter()
-                    .map(|cell| fmt_cell(*cell))
-                    .collect::<Vec<&str>>()
-                    .join("");
-                w.queue(style::Print(fmt_line))?
+            w.queue(style::Print("   +--------------------+"))?
+                .queue(cursor::MoveToNextLine(1))?;
+            for (idx, line) in temp_board.iter().take(20).enumerate().rev() {
+                let txt_line = format!(
+                    "{idx:02} |{}|",
+                    line.iter()
+                        .map(|cell| {
+                            cell.map_or(" .", |mino| match mino.get() {
+                                1 => "OO",
+                                2 => "II",
+                                3 => "SS",
+                                4 => "ZZ",
+                                5 => "TT",
+                                6 => "LL",
+                                7 => "JJ",
+                                _ => todo!("formatting unknown mino type"),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .join("")
+                );
+                w.queue(style::Print(txt_line))?
                     .queue(cursor::MoveToNextLine(1))?;
             }
+            w.queue(style::Print("   +--------------------+"))?
+                .queue(cursor::MoveToNextLine(1))?;
+            w.queue(style::Print(format!("   {time_elapsed:?}")))?
+                .queue(cursor::MoveToNextLine(1))?;
             // TODO: Do something with visual events.
-            for (_, visual_event) in visual_events {
-                match visual_event {
-                    VisualEvent::PieceLocked(_) => todo!(),
-                    VisualEvent::LineClears(_) => todo!(),
-                    VisualEvent::HardDrop(_, _) => todo!(),
+            for (_, visual_event) in new_visual_events {
+                let str = match visual_event {
                     VisualEvent::Accolade(
                         tetromino,
                         spin,
@@ -209,25 +205,34 @@ impl Menu {
                         if spin {
                             txts.push(format!("{tetromino:?}-Spin"))
                         }
-                        let txt_lineclear = format!(
-                            "{}",
-                            match n_lines_cleared {
-                                1 => "Single",
-                                2 => "Double",
-                                3 => "Triple",
-                                4 => "Quadle",
-                                _ => todo!("unformatted line clear count"),
-                            }
-                        );
-                        txts.push(txt_lineclear);
-                        txts.push(format!("[ x{combo} ]"));
-                        if perfect_clear {
-                            txts.push(format!("PERFECT!"));
+                        let txt_lineclear = match n_lines_cleared {
+                            1 => "Single!",
+                            2 => "Double!",
+                            3 => "Triple!",
+                            4 => "Quadle!",
+                            _ => todo!("unformatted line clear count"),
                         }
-                        let accolade = txts.join(" ");
-                        w.queue(style::Print(accolade))?;
+                        .to_string();
+                        txts.push(txt_lineclear);
+                        if combo > 1 {
+                            txts.push(format!("[ x{combo} ]"));
+                        }
+                        if perfect_clear {
+                            txts.push("PERFECT!".to_string());
+                        }
+                        txts.join(" ")
                     }
+                    VisualEvent::PieceLocked(_) => continue,
+                    VisualEvent::LineClears(_) => continue,
+                    VisualEvent::HardDrop(_, _) => continue,
+                    VisualEvent::Debug(s) => s,
                 };
+                vis_evt_msg_buf.push_front(str);
+            }
+            vis_evt_msg_buf.truncate(8);
+            for str in vis_evt_msg_buf.iter() {
+                w.queue(style::Print(str))?
+                    .queue(cursor::MoveToNextLine(1))?;
             }
             // Execute draw.
             w.flush()?;
@@ -242,35 +247,35 @@ impl Menu {
             }
         };
         *time_paused = Instant::now();
-        Ok(menu_update)
+        Ok(next_menu)
     }
 
     fn pause(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("pause screen") // TODO:
     }
 
     fn gameover(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("gameover screen") // TODO:
     }
 
     fn gamecomplete(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("game complete screen") // TODO:
     }
 
     fn options(w: &mut dyn Write, settings: &mut Settings) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("options screen") // TODO:
     }
 
     fn configurecontrols(w: &mut dyn Write, settings: &mut Settings) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("configure controls screen") // TODO:
     }
 
     fn replay(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("replay screen") // TODO:
     }
 
     fn scores(w: &mut dyn Write) -> io::Result<MenuUpdate> {
-        todo!() // TODO:
+        todo!("highscores screen") // TODO:
     }
 }
 
@@ -282,20 +287,39 @@ pub fn run(w: &mut impl Write) -> io::Result<String> {
     terminal::enable_raw_mode()?;
     // Preparing main game loop loop.
     // TODO: Store different keybind mappings somewhere and get default from there.
-    let keybinds = HashMap::from([
-        (dqKeyCode::Left, Button::MoveLeft),
-        (dqKeyCode::Right, Button::MoveRight),
-        (dqKeyCode::A, Button::RotateLeft),
-        //(dqKeyCode::S, Button::DropHard),
-        (dqKeyCode::D, Button::RotateRight),
-        (dqKeyCode::Down, Button::DropSoft),
-        (dqKeyCode::Up, Button::DropHard),
+    let _dq_keybinds = HashMap::from([
+        (DQ_Keycode::Left, Button::MoveLeft),
+        (DQ_Keycode::Right, Button::MoveRight),
+        (DQ_Keycode::A, Button::RotateLeft),
+        (DQ_Keycode::D, Button::RotateRight),
+        (DQ_Keycode::Down, Button::DropSoft),
+        (DQ_Keycode::Up, Button::DropHard),
     ]);
-    let mut settings = Settings { keybinds };
+    let ct_keybinds = HashMap::from([
+        (CT_Keycode::Left, Button::MoveLeft),
+        (CT_Keycode::Right, Button::MoveRight),
+        (CT_Keycode::Char('a'), Button::RotateLeft),
+        (CT_Keycode::Char('d'), Button::RotateRight),
+        (CT_Keycode::Down, Button::DropSoft),
+        (CT_Keycode::Up, Button::DropHard),
+    ]);
+    let mut settings = Settings {
+        keybinds: ct_keybinds,
+        game_fps: 24.0,
+    };
     let mut menu_stack = Vec::new();
     menu_stack.push(Menu::Title);
     menu_stack.push(Menu::Game(
-        Box::new(Game::new(Gamemode::marathon(), Instant::now())),
+        Box::new(Game::new(
+            Gamemode::custom(
+                "Debug".to_string(),
+                NonZeroU64::new(5).unwrap(),
+                true,
+                None,
+                MeasureStat::Pieces(0),
+            ),
+            Instant::now(),
+        )),
         Duration::ZERO,
         Instant::now(),
     )); // TODO: Remove this once menus are navigable.
