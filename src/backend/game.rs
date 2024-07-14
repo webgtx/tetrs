@@ -924,7 +924,7 @@ impl Game {
                         *ground_time_left = self.ground_time_cap;
                         *last_touchdown = event_time;
                     // Not connected to last ground touch, update ground time and set last_touchdown.
-                    } else if event_time.saturating_duration_since(*last_liftoff) > drop_delay {
+                    } else if event_time.saturating_duration_since(*last_liftoff) > 2 * drop_delay {
                         let last_ground_time =
                             last_liftoff.saturating_duration_since(*last_touchdown);
                         *ground_time_left -= ground_time_left.saturating_sub(last_ground_time);

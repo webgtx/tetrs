@@ -5,13 +5,13 @@ use std::{
     time::Instant,
 };
 
-pub use crossterm::event::KeyCode as CT_Keycode;
 use crossterm::event::{self, Event, KeyEvent};
-
-pub use device_query::keymap::Keycode as DQ_Keycode;
 use device_query::{CallbackGuard, DeviceEvents};
 
 use crate::backend::game::Button;
+
+pub use crossterm::event::KeyCode as CT_Keycode;
+pub use device_query::keymap::Keycode as DQ_Keycode;
 
 pub type ButtonSignal = Option<(Instant, Button, bool)>;
 
