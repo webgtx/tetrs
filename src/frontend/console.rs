@@ -139,7 +139,7 @@ impl Menu {
         let menu_update = loop {
             let next_frame = loop_start + Duration::from_secs_f64(f64::from(it) / GAME_FPS);
             let frame_delay = next_frame - Instant::now();
-            match rx.recv_timeout(frame_delay) {
+            let visual_events = match rx.recv_timeout(frame_delay) {
                 Ok(None) => break MenuUpdate::Push(Menu::Pause),
                 Ok(Some((button, button_state, instant))) => {
                     buttons_pressed[button] = button_state;
@@ -153,8 +153,11 @@ impl Menu {
                     unreachable!("game loop RecvTimeoutError::Disconnected")
                 }
             };
+            // TODO: Draw game.
+            // TODO: Do something with visual events.
+            let state = game.state();
             // Exit if game ended
-            if let Some(good_end) = game.finish_status() {
+            if let Some(good_end) = game.finished() {
                 let menu = if good_end {
                     Menu::GameComplete
                 } else {
@@ -162,8 +165,6 @@ impl Menu {
                 };
                 break MenuUpdate::Push(menu);
             }
-            // TODO: Draw game.
-            let info = game.info();
         };
         *time_paused = Instant::now();
         Ok(menu_update)

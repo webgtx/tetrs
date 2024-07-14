@@ -9,9 +9,9 @@ use crate::backend::{rotation_systems, tetromino_generators};
 
 pub type ButtonsPressed = ButtonMap<bool>;
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
-pub type TileTypeID = u32;
+pub type TileTypeID = usize;
 pub type Line = [Option<TileTypeID>; Game::WIDTH];
-pub type Board = [Line; Game::HEIGHT];
+pub type Board = Vec<Line>;
 pub type Coord = (usize, usize);
 pub type Offset = (isize, isize);
 type EventMap<T> = HashMap<Event, T>;
@@ -35,7 +35,7 @@ pub enum Tetromino {
     J,
 }
 
-#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
 pub(crate) struct ActivePiece {
     pub shape: Tetromino,
     pub orientation: Orientation,
@@ -86,7 +86,7 @@ struct LockingData {
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 enum Event {
-    LineClearDone,
+    LineClearDelayUp,
     Spawn,
     //GroundTimer, // TODO:
     Lock,
@@ -109,12 +109,14 @@ enum GameOverError {
 // TODO: `#[derive(Debug)]`.
 pub struct Game {
     // Game "state" fields.
-    finish_status: Option<bool>,
+    finished: Option<bool>,
     /// Invariants:
     /// * Until the game has finished there will always be more events: `finish_status.is_some() || !next_events.is_empty()`.
     /// * Unhandled events lie in the future: `for (event,event_time) in self.events { assert(self.time_updated < event_time); }`.
     events: EventMap<Instant>,
     buttons_pressed: ButtonsPressed,
+    /// Invariants:
+    /// * The Board height stays constant: `self.board.len() == old(self.board.len())`.
     board: Board,
     active_piece_data: Option<(ActivePiece, LockingData)>,
     /// Invariants:
@@ -128,6 +130,7 @@ pub struct Game {
     lines_cleared: Vec<Line>,
     level: u64, // TODO: Make this into NonZeroU64 or explicitly allow level 0.
     score: u64,
+    consecutive_line_clears: u64,
 
     // Game "settings" fields.
     gamemode: Gamemode,
@@ -143,7 +146,7 @@ pub struct Game {
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
-pub struct GameInfo<'a> {
+pub struct GameState<'a> {
     gamemode: &'a Gamemode,
     lines_cleared: &'a Vec<Line>,
     level: u64,
@@ -153,6 +156,14 @@ pub struct GameInfo<'a> {
     board: &'a Board,
     active_piece: Option<ActivePiece>,
     next_pieces: &'a VecDeque<Tetromino>,
+}
+
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+pub enum VisualEvent {
+    PieceLocked(ActivePiece),
+    LineClears(Vec<usize>),
+    HardDrop(ActivePiece, ActivePiece),
+    Accolade(Tetromino, bool, u64, u64),
 }
 
 impl Orientation {
@@ -256,13 +267,13 @@ impl ActivePiece {
         shape.minos(*orientation).map(|(dx, dy)| (x + dx, y + dy))
     }
 
-    pub(crate) fn fits(&self, board: Board) -> bool {
+    pub(crate) fn fits(&self, board: &Board) -> bool {
         self.tiles()
             .iter()
             .all(|&(x, y)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
     }
 
-    pub fn fits_at(&self, board: Board, offset: Offset) -> Option<ActivePiece> {
+    pub fn fits_at(&self, board: &Board, offset: Offset) -> Option<ActivePiece> {
         let mut new_piece = *self;
         new_piece.pos = add(self.pos, offset)?;
         new_piece.fits(board).then_some(new_piece)
@@ -270,7 +281,7 @@ impl ActivePiece {
 
     pub(crate) fn first_fit(
         &self,
-        board: Board,
+        board: &Board,
         offsets: impl IntoIterator<Item = Offset>,
     ) -> Option<ActivePiece> {
         let mut new_piece = *self;
@@ -281,7 +292,7 @@ impl ActivePiece {
         })
     }
 
-    fn well_piece(&self, board: Board) -> ActivePiece {
+    fn well_piece(&self, board: &Board) -> ActivePiece {
         let mut well_piece = *self;
         // Move piece all the way down.
         while let Some(piece_below) = well_piece.fits_at(board, (0, -1)) {
@@ -393,16 +404,21 @@ impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
 impl Game {
     pub const HEIGHT: usize = 27;
     pub const WIDTH: usize = 10;
+    pub const SKYLINE: usize = 20;
 
     pub fn new(mode: Gamemode, time_started: Instant) -> Self {
         let mut generator = tetromino_generators::RecencyProbGen::new();
         let preview_size = 1;
         let next_pieces = generator.by_ref().take(preview_size).collect();
+        let mut board = Vec::with_capacity(Self::HEIGHT);
+        for _ in 1..=Self::HEIGHT {
+            board.push(Line::default());
+        }
         Game {
-            finish_status: None,
+            finished: None,
             events: HashMap::from([(Event::Spawn, time_started)]),
             buttons_pressed: Default::default(),
-            board: Default::default(),
+            board,
             active_piece_data: None,
             next_pieces,
             time_started, // TODO: Refactor internal timeline to be Duration-based, shifting responsibility higher up.
@@ -411,6 +427,7 @@ impl Game {
             lines_cleared: Vec::new(),
             level: mode.start_level,
             score: 0,
+            consecutive_line_clears: 0,
             gamemode: mode,
             tetromino_generator: Box::new(generator),
             rotate_fn: rotation_systems::rotate_classic,
@@ -424,12 +441,12 @@ impl Game {
         }
     }
 
-    pub fn finish_status(&self) -> Option<bool> {
-        self.finish_status
+    pub fn finished(&self) -> Option<bool> {
+        self.finished
     }
 
-    pub fn info(&self) -> GameInfo {
-        GameInfo {
+    pub fn state(&self) -> GameState {
+        GameState {
             // TODO: Return current GameState, timeinterval (so we can render e.g. lineclears with intermediate states).
             board: &self.board,
             active_piece: self.active_piece_data.map(|apd| apd.0),
@@ -443,50 +460,64 @@ impl Game {
         }
     }
 
-    pub fn update(&mut self, mut new_button_state: Option<ButtonsPressed>, update_time: Instant) {
+    pub fn update(
+        &mut self,
+        mut new_button_state: Option<ButtonsPressed>,
+        update_time: Instant,
+    ) -> Vec<(Instant, VisualEvent)> {
+        // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
+        let mut visual_events = Vec::new();
         // Handle game over: return immediately.
-        if self.finish_status.is_some() {
-            return;
+        if self.finished.is_some() {
+            return visual_events;
         }
         // We linearly process all events until we reach the update time.
         'work_through_events: loop {
+            // Peek the next closest event.
             // SAFETY: `Game` invariants guarantee there's some event.
-            let (&event, _) = self
+            let (&event, &event_time) = self
                 .events
                 .iter()
                 .min_by_key(|(&event, &event_time)| (event_time, event))
                 .unwrap();
-            // SAFETY: `event` key was given to use by the `.min` function.
-            let (event, event_time) = self.events.remove_entry(&event).unwrap();
-            debug_assert!(
-                self.time_updated <= event_time,
-                "handling event lying in the past"
-            );
             // Next event within requested update time, handle event first.
             if event_time <= update_time {
+                debug_assert!(
+                    self.time_updated <= event_time,
+                    "handling event lying in the past"
+                );
+                // Extract (remove) event and handle it.
+                // SAFETY: `event` key was given to use by the `.min` function.
+                self.events.remove_entry(&event);
                 // Handle next in-game event.
                 let result = self.handle_event(event, event_time);
                 self.time_updated = event_time;
                 match result {
-                    Ok(()) => {
-                        // Check if game completed.
+                    Ok(new_visual_events) => {
+                        visual_events.extend(new_visual_events);
+                        // Check if game has to end.
                         if let Some(limit) = self.gamemode.limit {
                             let goal_achieved = match limit {
                                 MeasureStat::Lines(lines) => lines <= self.lines_cleared.len(),
                                 MeasureStat::Level(level) => level <= self.level,
                                 MeasureStat::Score(score) => score <= self.score,
-                                MeasureStat::Pieces(pieces) => pieces <= self.pieces_played.iter().sum(),
-                                MeasureStat::Time(timer) => timer <= self.time_updated - self.time_started,
+                                MeasureStat::Pieces(pieces) => {
+                                    pieces <= self.pieces_played.iter().sum()
+                                }
+                                MeasureStat::Time(timer) => {
+                                    timer <= self.time_updated - self.time_started
+                                }
                             };
                             if goal_achieved {
-                                self.finish_status = Some(true);
+                                // Game Completed.
+                                self.finished = Some(true);
                                 break 'work_through_events;
                             }
                         }
                     }
                     Err(GameOverError::BlockOut | GameOverError::LockOut) => {
                         // Game Over.
-                        self.finish_status = Some(false);
+                        self.finished = Some(false);
                         break 'work_through_events;
                     }
                 }
@@ -502,6 +533,7 @@ impl Game {
                 }
             }
         }
+        visual_events
     }
 
     fn process_input(&mut self, new_buttons_pressed: ButtonsPressed, update_time: Instant) {
@@ -581,10 +613,15 @@ impl Game {
         self.buttons_pressed = new_buttons_pressed;
     }
 
-    fn handle_event(&mut self, event: Event, event_time: Instant) -> Result<(), GameOverError> {
+    fn handle_event(
+        &mut self,
+        event: Event,
+        event_time: Instant,
+    ) -> Result<Vec<(Instant, VisualEvent)>, GameOverError> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
+        let mut visual_events = Vec::new();
         match event {
-            Event::LineClearDone => {
+            Event::LineClearDelayUp => {
                 self.events
                     .insert(Event::Spawn, event_time + self.appearance_delay);
             }
@@ -614,12 +651,12 @@ impl Game {
                     orientation: Orientation::N,
                     pos: start_pos,
                 };
-                // Newly spawned piece conflicts with board - Game over!
-                if !new_piece.fits(self.board) {
+                // Newly spawned piece conflicts with board - Game over.
+                if !new_piece.fits(&self.board) {
                     return Err(GameOverError::BlockOut);
                 }
                 let locking_data = LockingData {
-                    touches_ground: new_piece.fits_at(self.board, (0, -1)).is_none(),
+                    touches_ground: new_piece.fits_at(&self.board, (0, -1)).is_none(),
                     last_touchdown: event_time,
                     last_liftoff: event_time,
                     ground_time_left: self.ground_time_cap,
@@ -630,16 +667,78 @@ impl Game {
                 self.events.insert(Event::Fall, event_time);
             }
             Event::Lock => {
-                // TODO: Handle GameOverError.
-                // TODO: Lineclear.
-                // TODO: `self.lines_cleared`.
-                // TODO: `self.score`.
-                // TODO: `self.level`.
-                todo!();
+                let Some((active_piece, _)) = self.active_piece_data.take() else {
+                    unreachable!("locking none active piece")
+                };
+                // Attempt to lock active piece fully above skyline - Game over.
+                if active_piece
+                    .tiles()
+                    .iter()
+                    .any(|(_, y)| *y >= Self::SKYLINE)
+                {
+                    return Err(GameOverError::LockOut);
+                }
+                visual_events.push((event_time, VisualEvent::PieceLocked(active_piece)));
+                // Pre-save whether piece was spun into lock position.
+                let spin = active_piece.fits_at(&self.board, (0, 1)).is_none();
+                // Locking.
+                let minotype = usize::from(active_piece.shape);
+                for (x, y) in active_piece.tiles() {
+                    self.board[y][x] = Some(minotype);
+                }
+                // Handle line clearing.
+                let mut lines_cleared = Vec::<usize>::with_capacity(4);
+                for y in (0..Self::HEIGHT).rev() {
+                    // Full line: move it to the cleared lines storage and push an empty line to the board.
+                    if self.board[y].iter().all(|mino| mino.is_some()) {
+                        let line = self.board.remove(y);
+                        self.board.push(Default::default());
+                        self.lines_cleared.push(line);
+                        lines_cleared.push(y);
+                    }
+                }
+                if !lines_cleared.is_empty() {
+                    let n_tiles_used = u64::try_from(
+                        active_piece
+                            .tiles()
+                            .iter()
+                            .filter(|(_, y)| lines_cleared.contains(y))
+                            .count(),
+                    )
+                    .unwrap();
+                    let n_lines_cleared = u64::try_from(lines_cleared.len()).unwrap();
+                    visual_events.push((event_time, VisualEvent::LineClears(lines_cleared)));
+                    self.consecutive_line_clears += 1;
+                    // Add score bonus.
+                    let perfect_clear = self
+                        .board
+                        .iter()
+                        .all(|line| line.iter().all(|tile| tile.is_none()));
+                    let score_bonus = (10 + self.level - 1)
+                        * n_lines_cleared
+                        * n_tiles_used
+                        * if spin { 2 } else { 1 }
+                        * if perfect_clear { 10 } else { 1 }
+                        * self.consecutive_line_clears;
+                    self.score += score_bonus;
+                    let yippie: VisualEvent = VisualEvent::Accolade(
+                        active_piece.shape,
+                        spin,
+                        n_lines_cleared,
+                        self.consecutive_line_clears,
+                    );
+                    visual_events.push((event_time, yippie));
+                    // Increment level if 10 lines cleared.
+                    if self.lines_cleared.len() % 10 == 0 {
+                        self.level += 1;
+                    }
+                } else {
+                    self.consecutive_line_clears = 0;
+                }
                 // Clear all events and only put in line clear delay.
                 self.events.clear();
                 self.events
-                    .insert(Event::LineClearDone, event_time + self.line_clear_delay);
+                    .insert(Event::LineClearDelayUp, event_time + self.line_clear_delay);
             }
             Event::LockTimer => {
                 self.events.insert(Event::Lock, event_time);
@@ -649,7 +748,12 @@ impl Game {
                     unreachable!("hard-dropping none active piece")
                 };
                 // Move piece all the way down.
-                *active_piece = active_piece.well_piece(self.board);
+                let dropped_piece = active_piece.well_piece(&self.board);
+                visual_events.push((
+                    event_time,
+                    VisualEvent::HardDrop(*active_piece, dropped_piece),
+                ));
+                *active_piece = dropped_piece;
                 self.events
                     .insert(Event::LockTimer, event_time + self.hard_drop_delay);
             }
@@ -661,7 +765,7 @@ impl Game {
                     unreachable!("dropping none active piece")
                 };
                 // Try to move active piece down.
-                if let Some(piece_below) = active_piece.fits_at(self.board, (0, -1)) {
+                if let Some(piece_below) = active_piece.fits_at(&self.board, (0, -1)) {
                     *active_piece = piece_below;
                     self.events.insert(Event::Fall, event_time + drop_delay);
                 // Piece hit ground but SoftDrop was pressed.
@@ -683,7 +787,7 @@ impl Game {
                 } else {
                     1
                 };
-                if let Some(moved_piece) = active_piece.fits_at(self.board, (0, dx)) {
+                if let Some(moved_piece) = active_piece.fits_at(&self.board, (0, dx)) {
                     *active_piece = moved_piece;
                 }
                 let move_delay = if event == Event::MoveInitial {
@@ -708,11 +812,12 @@ impl Game {
                 if self.buttons_pressed[Button::RotateAround] {
                     rotation += 2;
                 }
-                if let Some(rotated_piece) = (self.rotate_fn)(*active_piece, self.board, rotation) {
+                if let Some(rotated_piece) = (self.rotate_fn)(*active_piece, &self.board, rotation)
+                {
                     *active_piece = rotated_piece;
                 }
             }
-        }
+        };
         /*
         Event interactions and locking:
         LineClearDone: ε -> ε +Spawn dly  (no piece)
@@ -736,7 +841,7 @@ impl Game {
         if let Some(touches_ground_after) = self
             .active_piece_data
             .as_ref()
-            .map(|(active_piece, _)| active_piece.fits_at(self.board, (0, -1)).is_none())
+            .map(|(active_piece, _)| active_piece.fits_at(&self.board, (0, -1)).is_none())
         {
             let drop_delay = self.drop_delay();
             let lock_delay = self.lock_delay();
@@ -786,7 +891,7 @@ impl Game {
                 *touches_ground = touches_ground_after;
             }
         }
-        Ok(())
+        Ok(visual_events)
     }
 
     #[rustfmt::skip]

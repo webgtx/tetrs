@@ -1,9 +1,13 @@
 use crate::backend::game::{ActivePiece, Board, Orientation, Tetromino};
 
-pub type RotateFn = fn(piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece>;
+pub type RotateFn = fn(piece: ActivePiece, board: &Board, right_turns: i32) -> Option<ActivePiece>;
 
 #[allow(dead_code)]
-pub fn rotate_dummy(mut piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece> {
+pub fn rotate_dummy(
+    mut piece: ActivePiece,
+    board: &Board,
+    right_turns: i32,
+) -> Option<ActivePiece> {
     piece.orientation = piece.orientation.rotate_r(right_turns);
     piece.fits_at(board, (0, 0))
 }
@@ -11,7 +15,7 @@ pub fn rotate_dummy(mut piece: ActivePiece, board: Board, right_turns: i32) -> O
 #[allow(dead_code)]
 pub fn rotate_classic(
     mut piece: ActivePiece,
-    board: Board,
+    board: &Board,
     right_turns: i32,
 ) -> Option<ActivePiece> {
     let right = match right_turns.rem_euclid(4) {
@@ -52,7 +56,7 @@ pub fn rotate_classic(
 }
 
 /* TODO: Improve and implement the 'Okay' Rotation System.
-pub fn rotate_okay(piece: ActivePiece, board: Board, right_turns: i32) -> Option<ActivePiece> {
+pub fn rotate_okay(piece: ActivePiece, board: &Board, right_turns: i32) -> Option<ActivePiece> {
     let ActivePiece(shape, o, pos) = piece;
     let r = match right_turns.rem_euclid(4) {
         0 => return Some(piece),
