@@ -16,7 +16,7 @@ use crossterm::{
 use input_handlers::{new_input_handler_crossterm, ButtonSignal, CT_Keycode, DQ_Keycode};
 
 use crate::backend::game::{
-    Button, ButtonsPressed, Game, GameState, Gamemode, MeasureStat, VisualEvent,
+    Button, ButtonsPressed, FeedbackEvent, Game, GameState, Gamemode, MeasureStat,
 };
 
 // TODO: Is `PartialEq` needed?
@@ -106,7 +106,7 @@ impl Menu {
         let (tx, rx) = mpsc::channel::<ButtonSignal>();
         let _input_handler = new_input_handler_crossterm(&tx, &settings.keybinds);
         // TODO: Remove these debug structs.
-        let mut vis_evt_msg_buf = VecDeque::new();
+        let mut feed_evt_msg_buf = VecDeque::new();
         // Game Loop
         let time_render_loop_start = Instant::now();
         let mut it = 0u32;
@@ -114,7 +114,7 @@ impl Menu {
             it += 1;
             let next_frame =
                 time_render_loop_start + Duration::from_secs_f64(f64::from(it) / settings.game_fps);
-            let mut new_visual_events = Vec::new();
+            let mut feedback_events = Vec::new();
             'idle_loop: loop {
                 let frame_idle_remaining = next_frame - Instant::now();
                 match rx.recv_timeout(frame_idle_remaining) {
@@ -127,15 +127,15 @@ impl Menu {
                     }
                     Ok(Some((instant, button, button_state))) => {
                         buttons_pressed[button] = button_state;
-                        let update_visual_events =
+                        let new_feedback_events =
                             game.update(Some(buttons_pressed), instant - *duration_paused_total);
-                        new_visual_events.extend(update_visual_events);
+                        feedback_events.extend(new_feedback_events);
                         continue 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         let now = Instant::now();
-                        let update_visual_events = game.update(None, now - *duration_paused_total);
-                        new_visual_events.extend(update_visual_events);
+                        let new_feedback_events = game.update(None, now - *duration_paused_total);
+                        feedback_events.extend(new_feedback_events);
                         break 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -190,10 +190,10 @@ impl Menu {
                 .queue(cursor::MoveToNextLine(1))?;
             w.queue(style::Print(format!("   {time_elapsed:?}")))?
                 .queue(cursor::MoveToNextLine(1))?;
-            // TODO: Do something with visual events.
-            for (_, visual_event) in new_visual_events {
-                let str = match visual_event {
-                    VisualEvent::Accolade(
+            // TODO: Do something with feedback events.
+            for (_, feedback_event) in feedback_events {
+                let str = match feedback_event {
+                    FeedbackEvent::Accolade(
                         tetromino,
                         spin,
                         n_lines_cleared,
@@ -221,15 +221,15 @@ impl Menu {
                         }
                         txts.join(" ")
                     }
-                    VisualEvent::PieceLocked(_) => continue,
-                    VisualEvent::LineClears(_) => continue,
-                    VisualEvent::HardDrop(_, _) => continue,
-                    VisualEvent::Debug(s) => s,
+                    FeedbackEvent::PieceLocked(_) => continue,
+                    FeedbackEvent::LineClears(_) => continue,
+                    FeedbackEvent::HardDrop(_, _) => continue,
+                    FeedbackEvent::Debug(s) => s,
                 };
-                vis_evt_msg_buf.push_front(str);
+                feed_evt_msg_buf.push_front(str);
             }
-            vis_evt_msg_buf.truncate(8);
-            for str in vis_evt_msg_buf.iter() {
+            feed_evt_msg_buf.truncate(8);
+            for str in feed_evt_msg_buf.iter() {
                 w.queue(style::Print(str))?
                     .queue(cursor::MoveToNextLine(1))?;
             }

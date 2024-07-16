@@ -132,9 +132,7 @@ pub struct Game {
     /// Invariants:
     /// * The Preview size stays constant: `self.next_pieces().size() == old(self.next_pieces().size())`.
     next_pieces: VecDeque<Tetromino>,
-    /// Invariants:
-    /// * The Preview size stays constant: `self.next_pieces().size() == old(self.next_pieces().size())`.
-    time_started: Instant,
+    time_started: Instant, // TODO: This belongs in `self.config` or removed when internal timers are refactored more abstractly.
     time_updated: Instant,
     pieces_played: [u64; 7],
     lines_cleared: Vec<Line>,
@@ -161,7 +159,7 @@ pub struct GameState<'a> {
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
-pub enum VisualEvent {
+pub enum FeedbackEvent {
     PieceLocked(ActivePiece),
     LineClears(Vec<usize>),
     HardDrop(ActivePiece, ActivePiece),
@@ -508,12 +506,12 @@ impl Game {
         &mut self,
         mut new_button_state: Option<ButtonsPressed>,
         update_time: Instant,
-    ) -> Vec<(Instant, VisualEvent)> {
+    ) -> Vec<(Instant, FeedbackEvent)> {
         // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
-        let mut visual_events = Vec::new();
+        let mut feedback_events = Vec::new();
         // Handle game over: return immediately.
         if self.finished.is_some() {
-            return visual_events;
+            return feedback_events;
         }
         // We linearly process all events until we reach the update time.
         'work_through_events: loop {
@@ -537,8 +535,8 @@ impl Game {
                 let result = self.handle_event(event, event_time);
                 self.time_updated = event_time;
                 match result {
-                    Ok(new_visual_events) => {
-                        visual_events.extend(new_visual_events);
+                    Ok(new_feedback_events) => {
+                        feedback_events.extend(new_feedback_events);
                         // Check if game has to end.
                         if let Some(limit) = self.config.gamemode.limit {
                             let goal_achieved = match limit {
@@ -579,7 +577,7 @@ impl Game {
                 }
             }
         }
-        visual_events
+        feedback_events
     }
 
     fn process_input(&mut self, new_buttons_pressed: ButtonsPressed, update_time: Instant) {
@@ -659,13 +657,13 @@ impl Game {
         &mut self,
         event: Event,
         event_time: Instant,
-    ) -> Result<Vec<(Instant, VisualEvent)>, GameOverError> {
+    ) -> Result<Vec<(Instant, FeedbackEvent)>, GameOverError> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
-        let mut visual_events = Vec::new();
+        let mut feedback_events = Vec::new();
         // TODO: Remove debug.
-        visual_events.push((
+        feedback_events.push((
             event_time,
-            VisualEvent::Debug(format!("{event:?} at {event_time:?}")),
+            FeedbackEvent::Debug(format!("{event:?} at {event_time:?}")),
         ));
         match event {
             Event::LineClear => {
@@ -734,7 +732,7 @@ impl Game {
                 {
                     return Err(GameOverError::LockOut);
                 }
-                visual_events.push((event_time, VisualEvent::PieceLocked(active_piece)));
+                feedback_events.push((event_time, FeedbackEvent::PieceLocked(active_piece)));
                 // Pre-save whether piece was spun into lock position.
                 let spin = active_piece.fits_at(&self.board, (0, 1)).is_none();
                 // Locking.
@@ -758,7 +756,7 @@ impl Game {
                             .count(),
                     )
                     .unwrap();
-                    visual_events.push((event_time, VisualEvent::LineClears(lines_cleared)));
+                    feedback_events.push((event_time, FeedbackEvent::LineClears(lines_cleared)));
                     self.consecutive_line_clears += 1;
                     // Add score bonus.
                     let perfect_clear = self
@@ -772,14 +770,14 @@ impl Game {
                         * if perfect_clear { 10 } else { 1 }
                         * self.consecutive_line_clears;
                     self.score += score_bonus;
-                    let yippie: VisualEvent = VisualEvent::Accolade(
+                    let yippie: FeedbackEvent = FeedbackEvent::Accolade(
                         active_piece.shape,
                         spin,
                         n_lines_cleared,
                         self.consecutive_line_clears,
                         perfect_clear,
                     );
-                    visual_events.push((event_time, yippie));
+                    feedback_events.push((event_time, yippie));
                     // Increment level if 10 lines cleared.
                     if self.lines_cleared.len() % 10 == 0 {
                         self.level += 1;
@@ -806,9 +804,9 @@ impl Game {
                 };
                 // Move piece all the way down.
                 let dropped_piece = active_piece.well_piece(&self.board);
-                visual_events.push((
+                feedback_events.push((
                     event_time,
-                    VisualEvent::HardDrop(*active_piece, dropped_piece),
+                    FeedbackEvent::HardDrop(*active_piece, dropped_piece),
                 ));
                 *active_piece = dropped_piece;
                 self.events
@@ -816,7 +814,9 @@ impl Game {
             }
             Event::Fall | Event::SoftDrop => {
                 let drop_delay = if event == Event::SoftDrop {
-                    Duration::from_secs_f64(self.drop_delay().as_secs_f64() / self.config.soft_drop_factor)
+                    Duration::from_secs_f64(
+                        self.drop_delay().as_secs_f64() / self.config.soft_drop_factor,
+                    )
                 } else {
                     self.drop_delay()
                 };
@@ -871,7 +871,8 @@ impl Game {
                 if self.buttons_pressed[Button::RotateAround] {
                     rotation += 2;
                 }
-                if let Some(rotated_piece) = (self.config.rotate_fn)(*active_piece, &self.board, rotation)
+                if let Some(rotated_piece) =
+                    (self.config.rotate_fn)(*active_piece, &self.board, rotation)
                 {
                     *active_piece = rotated_piece;
                 }
@@ -950,7 +951,7 @@ impl Game {
                 *touches_ground = touches_ground_after;
             }
         }
-        Ok(visual_events)
+        Ok(feedback_events)
     }
 
     #[rustfmt::skip]
