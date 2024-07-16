@@ -27,7 +27,7 @@ struct Settings {
     // TODO: What's the information stored throughout the entire application?
 }
 
-// TODO: `#[derive(Debug)]`.
+#[derive(Debug)]
 enum Menu {
     Title,
     NewGame(Gamemode),
@@ -42,7 +42,7 @@ enum Menu {
     ConfigureControls,
 }
 
-// TODO: `#[derive(Debug)]`.
+#[derive(Debug)]
 enum MenuUpdate {
     Pop,
     Push(Menu),
@@ -146,7 +146,6 @@ impl Menu {
             }
             // TODO: Draw game.
             let GameState {
-                gamemode,
                 lines_cleared,
                 level,
                 score,
@@ -209,7 +208,7 @@ impl Menu {
                             1 => "Single!",
                             2 => "Double!",
                             3 => "Triple!",
-                            4 => "Quadle!",
+                            4 => "Quadruple!",
                             _ => todo!("unformatted line clear count"),
                         }
                         .to_string();

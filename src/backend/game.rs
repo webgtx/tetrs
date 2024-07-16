@@ -99,14 +99,25 @@ enum Event {
     Fall,
 }
 
-#[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-enum GameOverError {
-    LockOut,
-    BlockOut,
+pub struct GameConfig {
+    pub gamemode: Gamemode,
+    pub tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
+    pub rotate_fn: rotation_systems::RotateFn,
+    pub appearance_delay: Duration,
+    pub delayed_auto_shift: Duration,
+    pub auto_repeat_rate: Duration,
+    pub soft_drop_factor: f64,
+    pub hard_drop_delay: Duration,
+    pub ground_time_cap: Duration,
+    pub line_clear_delay: Duration,
 }
 
 /// TODO: Documentation. "Does not query time anywhere, it's the user's responsibility to handle time correctly."
+#[derive(Debug)]
 pub struct Game {
+    // Game "settings" field.
+    config: GameConfig,
+
     // Game "state" fields.
     finished: Option<bool>,
     /// Invariants:
@@ -130,23 +141,16 @@ pub struct Game {
     level: u64, // TODO: Make this into NonZeroU64 or explicitly allow level 0.
     score: u64,
     consecutive_line_clears: u64,
+}
 
-    // Game "settings" fields.
-    gamemode: Gamemode,
-    tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
-    rotate_fn: rotation_systems::RotateFn,
-    appearance_delay: Duration,
-    delayed_auto_shift: Duration,
-    auto_repeat_rate: Duration,
-    soft_drop_factor: f64,
-    hard_drop_delay: Duration,
-    ground_time_cap: Duration,
-    line_clear_delay: Duration,
+#[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
+enum GameOverError {
+    LockOut,
+    BlockOut,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct GameState<'a> {
-    pub gamemode: &'a Gamemode,
     pub lines_cleared: &'a Vec<Line>,
     pub level: u64,
     pub score: u64,
@@ -418,22 +422,9 @@ impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
     }
 }
 
-impl fmt::Debug for Game {
+impl fmt::Debug for GameConfig {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("Game")
-            .field("finished", &self.finished)
-            .field("events", &self.events)
-            .field("buttons_pressed", &self.buttons_pressed)
-            .field("board", &self.board)
-            .field("active_piece_data", &self.active_piece_data)
-            .field("next_pieces", &self.next_pieces)
-            .field("time_started", &self.time_started)
-            .field("time_updated", &self.time_updated)
-            .field("pieces_played", &self.pieces_played)
-            .field("lines_cleared", &self.lines_cleared)
-            .field("level", &self.level)
-            .field("score", &self.score)
-            .field("consecutive_line_clears", &self.consecutive_line_clears)
+        fmt.debug_struct("GameConfig")
             .field("gamemode", &self.gamemode)
             .field("tetromino_generator", &"PLACEHOLDER") // TODO: Better debug?
             .field("rotate_fn", &self.rotate_fn)
@@ -475,16 +466,18 @@ impl Game {
             level: mode.start_level,
             score: 0,
             consecutive_line_clears: 0,
-            gamemode: mode,
-            tetromino_generator: Box::new(generator),
-            rotate_fn: rotation_systems::rotate_classic,
-            appearance_delay: Duration::from_millis(100),
-            delayed_auto_shift: Duration::from_millis(300),
-            auto_repeat_rate: Duration::from_millis(100),
-            soft_drop_factor: 20.0,
-            hard_drop_delay: Duration::from_micros(100),
-            ground_time_cap: Duration::from_millis(2250),
-            line_clear_delay: Duration::from_millis(200),
+            config: GameConfig {
+                gamemode: mode,
+                tetromino_generator: Box::new(generator),
+                rotate_fn: rotation_systems::rotate_classic,
+                appearance_delay: Duration::from_millis(100),
+                delayed_auto_shift: Duration::from_millis(300),
+                auto_repeat_rate: Duration::from_millis(100),
+                soft_drop_factor: 20.0,
+                hard_drop_delay: Duration::from_micros(100),
+                ground_time_cap: Duration::from_millis(2250),
+                line_clear_delay: Duration::from_millis(200),
+            },
         }
     }
 
@@ -498,7 +491,6 @@ impl Game {
             board: &self.board,
             active_piece: self.active_piece_data.map(|apd| apd.0),
             next_pieces: &self.next_pieces,
-            gamemode: &self.gamemode,
             lines_cleared: &self.lines_cleared,
             level: self.level,
             score: self.score,
@@ -506,6 +498,10 @@ impl Game {
                 .time_updated
                 .saturating_duration_since(self.time_started),
         }
+    }
+
+    pub fn config(&mut self) -> &mut GameConfig {
+        &mut self.config
     }
 
     pub fn update(
@@ -544,7 +540,7 @@ impl Game {
                     Ok(new_visual_events) => {
                         visual_events.extend(new_visual_events);
                         // Check if game has to end.
-                        if let Some(limit) = self.gamemode.limit {
+                        if let Some(limit) = self.config.gamemode.limit {
                             let goal_achieved = match limit {
                                 MeasureStat::Lines(lines) => lines <= self.lines_cleared.len(),
                                 MeasureStat::Level(level) => level <= self.level,
@@ -651,8 +647,6 @@ impl Game {
         // Soft drop button pressed.
         if !dS0 && dS1 {
             self.events.insert(Event::SoftDrop, update_time);
-            // TODO: Fix the below? Note: causes issues with Crossterm / standard console inputs.
-            // Soft drop button released, reset drop delay immediately.
         }
         // Hard drop button pressed.
         if !dH0 && dH1 {
@@ -676,11 +670,12 @@ impl Game {
         match event {
             Event::LineClearDelayUp => {
                 self.events
-                    .insert(Event::Spawn, event_time + self.appearance_delay);
+                    .insert(Event::Spawn, event_time + self.config.appearance_delay);
             }
             Event::Spawn => {
                 // We generate a new piece above the skyline, and immediately queue a fall event for it.
                 let gen_tetromino = self
+                    .config
                     .tetromino_generator
                     .next()
                     .expect("random piece generator ran out of values before end of game");
@@ -712,7 +707,7 @@ impl Game {
                     touches_ground: new_piece.fits_at(&self.board, (0, -1)).is_none(),
                     last_touchdown: event_time,
                     last_liftoff: event_time,
-                    ground_time_left: self.ground_time_cap,
+                    ground_time_left: self.config.ground_time_cap,
                     lowest_y: start_pos.1,
                 };
                 self.active_piece_data = Some((new_piece, locking_data));
@@ -792,10 +787,10 @@ impl Game {
                 self.events.clear();
                 if n_lines_cleared > 0 {
                     self.events
-                        .insert(Event::LineClearDelayUp, event_time + self.line_clear_delay);
+                        .insert(Event::LineClearDelayUp, event_time + self.config.line_clear_delay);
                 } else {
                     self.events
-                        .insert(Event::Spawn, event_time + self.appearance_delay);
+                        .insert(Event::Spawn, event_time + self.config.appearance_delay);
                 }
             }
             Event::LockTimer => {
@@ -813,11 +808,11 @@ impl Game {
                 ));
                 *active_piece = dropped_piece;
                 self.events
-                    .insert(Event::LockTimer, event_time + self.hard_drop_delay);
+                    .insert(Event::LockTimer, event_time + self.config.hard_drop_delay);
             }
             Event::Fall | Event::SoftDrop => {
                 let drop_delay = if event == Event::SoftDrop {
-                    Duration::from_secs_f64(self.drop_delay().as_secs_f64() / self.soft_drop_factor)
+                    Duration::from_secs_f64(self.drop_delay().as_secs_f64() / self.config.soft_drop_factor)
                 } else {
                     self.drop_delay()
                 };
@@ -851,9 +846,9 @@ impl Game {
                     *active_piece = moved_piece;
                 }
                 let move_delay = if event == Event::MoveInitial {
-                    self.delayed_auto_shift
+                    self.config.delayed_auto_shift
                 } else {
-                    self.auto_repeat_rate
+                    self.config.auto_repeat_rate
                 };
                 self.events
                     .insert(Event::MoveRepeat, event_time + move_delay);
@@ -872,7 +867,7 @@ impl Game {
                 if self.buttons_pressed[Button::RotateAround] {
                     rotation += 2;
                 }
-                if let Some(rotated_piece) = (self.rotate_fn)(*active_piece, &self.board, rotation)
+                if let Some(rotated_piece) = (self.config.rotate_fn)(*active_piece, &self.board, rotation)
                 {
                     *active_piece = rotated_piece;
                 }
@@ -921,7 +916,7 @@ impl Game {
                     // New lowest ever reached, reset ground time completely.
                     if active_piece.pos.1 < *lowest_y {
                         *lowest_y = active_piece.pos.1;
-                        *ground_time_left = self.ground_time_cap;
+                        *ground_time_left = self.config.ground_time_cap;
                         *last_touchdown = event_time;
                     // Not connected to last ground touch, update ground time and set last_touchdown.
                     } else if event_time.saturating_duration_since(*last_liftoff) > 2 * drop_delay {
