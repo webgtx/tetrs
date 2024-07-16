@@ -87,7 +87,7 @@ struct LockingData {
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 enum Event {
-    LineClearDelayUp,
+    LineClear,
     Spawn,
     Lock,
     LockTimer,
@@ -668,7 +668,15 @@ impl Game {
             VisualEvent::Debug(format!("{event:?} at {event_time:?}")),
         ));
         match event {
-            Event::LineClearDelayUp => {
+            Event::LineClear => {
+                for y in (0..Self::HEIGHT).rev() {
+                    // Full line: move it to the cleared lines storage and push an empty line to the board.
+                    if self.board[y].iter().all(|mino| mino.is_some()) {
+                        let line = self.board.remove(y);
+                        self.board.push(Default::default());
+                        self.lines_cleared.push(line);
+                    }
+                }
                 self.events
                     .insert(Event::Spawn, event_time + self.config.appearance_delay);
             }
@@ -733,14 +741,10 @@ impl Game {
                 for ((x, y), tile_type_id) in active_piece.tiles() {
                     self.board[y][x] = Some(tile_type_id);
                 }
-                // Handle line clearing.
+                // Handle line clear counting for score (only do actual clearing in LineClear).
                 let mut lines_cleared = Vec::<usize>::with_capacity(4);
                 for y in (0..Self::HEIGHT).rev() {
-                    // Full line: move it to the cleared lines storage and push an empty line to the board.
                     if self.board[y].iter().all(|mino| mino.is_some()) {
-                        let line = self.board.remove(y);
-                        self.board.push(Default::default());
-                        self.lines_cleared.push(line);
                         lines_cleared.push(y);
                     }
                 }
@@ -787,7 +791,7 @@ impl Game {
                 self.events.clear();
                 if n_lines_cleared > 0 {
                     self.events
-                        .insert(Event::LineClearDelayUp, event_time + self.config.line_clear_delay);
+                        .insert(Event::LineClear, event_time + self.config.line_clear_delay);
                 } else {
                     self.events
                         .insert(Event::Spawn, event_time + self.config.appearance_delay);
