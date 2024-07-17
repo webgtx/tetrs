@@ -127,9 +127,9 @@ impl Menu {
                     }
                     Ok(Some((instant, button, button_state))) => {
                         buttons_pressed[button] = button_state;
-                        let instant = std::cmp::max(instant, game.state().time_updated); // Make sure button press
+                        let instant = std::cmp::max(instant - *duration_paused_total, game.state().time_updated); // Make sure button press
                         let new_feedback_events =
-                            game.update(Some(buttons_pressed), instant - *duration_paused_total);
+                            game.update(Some(buttons_pressed), instant);
                         feedback_events.extend(new_feedback_events);
                         continue 'idle_loop;
                     }

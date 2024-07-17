@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::backend::{rotation_systems, tetromino_generators};
+use crate::backend::{rotation_systems::{self, RotationSystem}, tetromino_generators};
 
 pub type ButtonsPressed = ButtonMap<bool>;
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
@@ -103,7 +103,7 @@ pub struct GameConfig {
     pub time_started: Instant, // TODO: This should *NOT* be exposed. But this should be removed anyway once internal timers are refactored to be less dependent on real time.
     pub gamemode: Gamemode,
     pub tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
-    pub rotate_fn: rotation_systems::RotateFn,
+    pub rotation_system: Box<dyn rotation_systems::RotationSystem>,
     pub preview_count: usize,
     pub appearance_delay: Duration,
     pub delayed_auto_shift: Duration,
@@ -425,8 +425,8 @@ impl fmt::Debug for GameConfig {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("GameConfig")
             .field("gamemode", &self.gamemode)
-            .field("tetromino_generator", &"PLACEHOLDER") // TODO: Better debug?
-            .field("rotate_fn", &self.rotate_fn)
+            .field("tetromino_generator", &"PLACEHOLDER_FOR_TETROMINOGENERATOR") // TODO: Better debug?
+            .field("rotate_fn", &"PLACEHOLDER_FOR_ROTATIONSYSTEM")
             .field("appearance_delay", &self.appearance_delay)
             .field("delayed_auto_shift", &self.delayed_auto_shift)
             .field("auto_repeat_rate", &self.auto_repeat_rate)
@@ -448,7 +448,7 @@ impl Game {
             time_started,
             gamemode: mode,
             tetromino_generator: Box::new(tetromino_generators::RecencyProbGen::new()),
-            rotate_fn: rotation_systems::rotate_classic,
+            rotation_system: Box::new(rotation_systems::Classic),
             preview_count: 1,
             appearance_delay: Duration::from_millis(100),
             delayed_auto_shift: Duration::from_millis(300),
@@ -682,20 +682,11 @@ impl Game {
                 let n_required_pieces = self.config.preview_count - self.next_pieces.len() + 1;
                 self.next_pieces.extend(self.config.tetromino_generator.by_ref().take(n_required_pieces));
                 let tetromino = self.next_pieces.pop_front().expect("piece generator ran out before game finished");
-                let start_pos = match tetromino {
-                    Tetromino::O => (4, 20),
-                    Tetromino::I => (3, 20),
-                    _ => (3, 20),
-                };
                 debug_assert!(
                     self.active_piece_data.is_none(),
                     "spawning new piece while an active piece is still in play"
                 );
-                let new_piece = ActivePiece {
-                    shape: tetromino,
-                    orientation: Orientation::N,
-                    pos: start_pos,
-                };
+                let new_piece = rotation_systems::Okay.place_initial(tetromino);//self.config.rotation_system.place_initial(tetromino);
                 // Newly spawned piece conflicts with board - Game over.
                 if !new_piece.fits(&self.board) {
                     return Err(GameOverError::BlockOut);
@@ -705,7 +696,7 @@ impl Game {
                     last_touchdown: event_time,
                     last_liftoff: event_time,
                     ground_time_left: self.config.ground_time_cap,
-                    lowest_y: start_pos.1,
+                    lowest_y: new_piece.pos.1,
                 };
                 self.active_piece_data = Some((new_piece, locking_data));
                 self.pieces_played[<usize>::from(tetromino)] += 1;
@@ -863,7 +854,7 @@ impl Game {
                     rotation += 2;
                 }
                 if let Some(rotated_piece) =
-                    (self.config.rotate_fn)(*active_piece, &self.board, rotation)
+                    self.config.rotation_system.rotate(active_piece, &self.board, rotation)
                 {
                     *active_piece = rotated_piece;
                 }
