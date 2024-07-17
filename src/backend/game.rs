@@ -673,6 +673,7 @@ impl Game {
             event_time,
             FeedbackEvent::Debug(format!("{event:?} at {event_time:?}")),
         ));
+        let old_active_piece_data = self.active_piece_data;
         match event {
             Event::LineClear => {
                 for y in (0..Self::HEIGHT).rev() {
@@ -688,6 +689,10 @@ impl Game {
             }
             // We generate a new piece above the skyline, and immediately queue a fall event for it.
             Event::Spawn => {
+                debug_assert!(
+                    self.active_piece_data.is_none(),
+                    "spawning new piece while an active piece is still in play"
+                );
                 let n_required_pieces = self.config.preview_count - self.next_pieces.len() + 1;
                 self.next_pieces.extend(
                     self.config
@@ -699,10 +704,6 @@ impl Game {
                     .next_pieces
                     .pop_front()
                     .expect("piece generator ran out before game finished");
-                debug_assert!(
-                    self.active_piece_data.is_none(),
-                    "spawning new piece while an active piece is still in play"
-                );
                 let new_piece = rotation_systems::Okay.place_initial(tetromino); //self.config.rotation_system.place_initial(tetromino);
                                                                                  // Newly spawned piece conflicts with board - Game over.
                 if !new_piece.fits(&self.board) {
@@ -917,7 +918,7 @@ impl Game {
                 },
             )) = self.active_piece_data.as_mut()
             {
-                // Piece was afloat and now landed.
+                // Piece was afloat and now landed, possibly update lowest_y and touchdown or connect to last touchdown.
                 if !*touches_ground && touches_ground_after {
                     // New lowest ever reached, reset ground time completely.
                     if active_piece.pos.1 < *lowest_y {
@@ -926,26 +927,26 @@ impl Game {
                         *last_touchdown = event_time;
                     // Not connected to last ground touch, update ground time and set last_touchdown.
                     } else if event_time.saturating_duration_since(*last_liftoff) > 2 * drop_delay {
-                        let last_ground_time =
+                        let some_ground_time =
                             last_liftoff.saturating_duration_since(*last_touchdown);
-                        *ground_time_left -= ground_time_left.saturating_sub(last_ground_time);
+                        *ground_time_left = ground_time_left.saturating_sub(some_ground_time);
                         *last_touchdown = event_time;
                         // Otherwise: Connected to last ground touch, leave last_touchdown intact.
                     }
-                // Piece was on ground and is now in the air.
+                // Piece was on ground and is now in the air, update liftoff.
                 } else if *touches_ground && !touches_ground_after {
                     *last_liftoff = event_time;
                     self.events.remove(&Event::LockTimer);
                 }
-                // (Re)schedule lock timer if it's on the ground without a timer, or upon move/rotate.
+                //  Need to reschedule lock timer (if on the ground without a timer or moved/rotated).
                 if touches_ground_after
                     && (!self.events.contains_key(&Event::LockTimer)
-                        || event == Event::MoveInitial
-                        || event == Event::MoveRepeat
-                        || event == Event::Rotate)
+                        || (
+                            (event == Event::Rotate || event == Event::MoveInitial || event == Event::MoveRepeat)
+                            && old_active_piece_data.map(|(old_active_piece, _)| old_active_piece != *active_piece).unwrap_or(false)))
                 {
-                    let ground_time_left =
-                        *ground_time_left - event_time.saturating_duration_since(*last_touchdown);
+                    let some_ground_time = event_time.saturating_duration_since(*last_touchdown);
+                    let ground_time_left = ground_time_left.saturating_sub(some_ground_time);
                     let delay = std::cmp::min(lock_delay, ground_time_left);
                     self.events.insert(Event::LockTimer, event_time + delay);
                 }
