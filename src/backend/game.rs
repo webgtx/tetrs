@@ -1,4 +1,3 @@
-// TODO: Too many (unnecessary) derives for all the structs?
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -46,17 +45,16 @@ pub(crate) struct ActivePiece {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 pub enum MeasureStat {
     Lines(usize),
-    Level(u64),
+    Level(NonZeroU64),
     Score(u64),
     Pieces(u64),
     Time(Duration),
 }
 
-// TODO: Manually `impl Eq, PartialEq for Gamemode`?
-#[derive(Eq, PartialEq, Clone, Hash, Debug)]
+#[derive(Eq, Clone, Hash, Debug)]
 pub struct Gamemode {
     name: String,
-    start_level: u64,
+    start_level: NonZeroU64,
     increase_level: bool,
     limit: Option<MeasureStat>,
     optimize: MeasureStat,
@@ -100,8 +98,6 @@ enum Event {
 }
 
 pub struct GameConfig {
-    pub time_started: Instant, // TODO: This should *NOT* be exposed. But this should be removed anyway once internal timers are refactored to be less dependent on real time.
-    pub gamemode: Gamemode,
     pub tetromino_generator: Box<dyn Iterator<Item = Tetromino>>,
     pub rotation_system: Box<dyn rotation_systems::RotationSystem>,
     pub preview_count: usize,
@@ -114,14 +110,17 @@ pub struct GameConfig {
     pub line_clear_delay: Duration,
 }
 
-/// TODO: Documentation. "Does not query time anywhere, it's the user's responsibility to handle time correctly."
 #[derive(Debug)]
 pub struct Game {
+    // Game "constants" field.
+    time_started: Instant, // TODO: Remove once internal timers are refactored to make game less dependent on real time.
+    gamemode: Gamemode,
+
     // Game "settings" field.
     config: GameConfig,
 
     // Game "state" fields.
-    finished: Option<bool>,
+    finished: Option<Result<(), GameOver>>,
     /// Invariants:
     /// * Until the game has finished there will always be more events: `finish_status.is_some() || !next_events.is_empty()`.
     /// * Unhandled events lie in the future: `for (event,event_time) in self.events { assert(self.time_updated < event_time); }`.
@@ -137,33 +136,35 @@ pub struct Game {
     time_updated: Instant,
     pieces_played: [u64; 7],
     lines_cleared: Vec<Line>,
-    level: u64, // TODO: Make this into NonZeroU64 or explicitly allow level 0.
+    level: NonZeroU64,
     score: u64,
     consecutive_line_clears: u64,
     back_to_back_special_clears: u64,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-enum GameOverError {
+pub enum GameOver {
     LockOut,
     BlockOut,
 }
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Hash, Debug)]
 pub struct GameState<'a> {
     pub lines_cleared: &'a Vec<Line>,
-    pub level: u64,
+    pub level: NonZeroU64,
     pub score: u64,
     pub time_updated: Instant,
     pub board: &'a Board,
     pub active_piece: Option<ActivePiece>,
     pub next_pieces: &'a VecDeque<Tetromino>,
+    pub time_started: Instant,
+    pub gamemode: &'a Gamemode,
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
 pub enum FeedbackEvent {
     PieceLocked(ActivePiece),
-    LineClears(Vec<usize>),
+    LineClears(Vec<usize>, Duration),
     HardDrop(ActivePiece, ActivePiece),
     Accolade(Tetromino, bool, u64, bool, u64),
     Debug(String),
@@ -332,7 +333,6 @@ impl Gamemode {
         mode_limit: Option<MeasureStat>,
         optimization_goal: MeasureStat,
     ) -> Self {
-        let start_level = start_level.get();
         Self {
             name,
             start_level,
@@ -344,7 +344,6 @@ impl Gamemode {
 
     #[allow(dead_code)]
     pub fn sprint(start_level: NonZeroU64) -> Self {
-        let start_level = start_level.get();
         Self {
             name: String::from("Sprint"),
             start_level,
@@ -356,7 +355,6 @@ impl Gamemode {
 
     #[allow(dead_code)]
     pub fn ultra(start_level: NonZeroU64) -> Self {
-        let start_level = start_level.get();
         Self {
             name: String::from("Ultra"),
             start_level,
@@ -370,9 +368,10 @@ impl Gamemode {
     pub fn marathon() -> Self {
         Self {
             name: String::from("Marathon"),
-            start_level: 1,
+            start_level: NonZeroU64::MIN,
             increase_level: true,
-            limit: Some(MeasureStat::Level(30)), // TODO: This depends on the highest level available.
+            // SAFETY: 30 > 0.
+            limit: Some(MeasureStat::Level(NonZeroU64::new(30).unwrap())), // NOTE: This depends on the highest level available.
             optimize: MeasureStat::Score(0),
         }
     }
@@ -381,15 +380,36 @@ impl Gamemode {
     pub fn endless() -> Self {
         Self {
             name: String::from("Endless"),
-            start_level: 1,
+            start_level: NonZeroU64::MIN,
             increase_level: true,
             limit: None,
             optimize: MeasureStat::Pieces(0),
         }
     }
-    // TODO: Gamemode pub fn master() -> Self : 20G gravity mode...
+
+    // TODO: Tweak the details of this, perhaps even after speed curve adjusted?
+    #[allow(dead_code)]
+    pub fn master() -> Self {
+        Self {
+            name: String::from("Master"),
+            // SAFETY: 20 > 0.
+            start_level: NonZeroU64::new(20).unwrap(),
+            increase_level: true,
+            limit: Some(MeasureStat::Lines(300)),
+            optimize: MeasureStat::Score(0),
+        }
+    }
     // TODO: Gamemode pub fn increment() -> Self : regain time to keep playing...
     // TODO: Gamemode pub fn finesse() -> Self : minimize Finesse(u64) for certain linecount...
+}
+
+impl PartialEq for Gamemode {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_level == other.start_level
+            && self.increase_level == other.increase_level
+            && self.limit == other.limit
+            && self.optimize == other.optimize
+    }
 }
 
 impl<T> std::ops::Index<Button> for ButtonMap<T> {
@@ -425,9 +445,14 @@ impl<T> std::ops::IndexMut<Button> for ButtonMap<T> {
 impl fmt::Debug for GameConfig {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("GameConfig")
-            .field("gamemode", &self.gamemode)
-            .field("tetromino_generator", &"PLACEHOLDER_FOR_TETROMINOGENERATOR") // TODO: Better debug?
-            .field("rotate_fn", &"PLACEHOLDER_FOR_ROTATIONSYSTEM")
+            .field(
+                "tetromino_generator",
+                &std::any::type_name_of_val(&self.tetromino_generator),
+            )
+            .field(
+                "rotation_system",
+                &std::any::type_name_of_val(&self.rotation_system),
+            )
             .field("appearance_delay", &self.appearance_delay)
             .field("delayed_auto_shift", &self.delayed_auto_shift)
             .field("auto_repeat_rate", &self.auto_repeat_rate)
@@ -444,28 +469,26 @@ impl Game {
     pub const WIDTH: usize = 10;
     pub const SKYLINE: usize = 20; // Typical maximal height of relevant (visible) playing grid.
 
-    pub fn with_gamemode(mode: Gamemode, time_started: Instant) -> Self {
+    pub fn with_gamemode(gamemode: Gamemode, time_started: Instant) -> Self {
         let default_config = GameConfig {
-            time_started,
-            gamemode: mode,
             tetromino_generator: Box::new(tetromino_generators::RecencyProbGen::new()),
             rotation_system: Box::new(rotation_systems::Classic),
             preview_count: 1,
             appearance_delay: Duration::from_millis(100),
-            delayed_auto_shift: Duration::from_millis(200),
-            auto_repeat_rate: Duration::from_millis(75),
+            delayed_auto_shift: Duration::from_millis(250),
+            auto_repeat_rate: Duration::from_millis(50),
             soft_drop_factor: 20.0,
             hard_drop_delay: Duration::from_micros(100),
             ground_time_max: Duration::from_millis(2250),
             line_clear_delay: Duration::from_millis(200),
         };
-        Self::with_config(default_config)
+        Self::with_config(gamemode, time_started, default_config)
     }
 
-    pub fn with_config(mut config: GameConfig) -> Self {
+    pub fn with_config(gamemode: Gamemode, time_started: Instant, mut config: GameConfig) -> Self {
         Game {
             finished: None,
-            events: HashMap::from([(Event::Spawn, config.time_started)]),
+            events: HashMap::from([(Event::Spawn, time_started)]),
             buttons_pressed: Default::default(),
             board: std::iter::repeat(Line::default())
                 .take(Self::HEIGHT)
@@ -476,24 +499,27 @@ impl Game {
                 .by_ref()
                 .take(config.preview_count)
                 .collect(),
-            time_updated: config.time_started,
+            time_updated: time_started,
             pieces_played: [0; 7],
             lines_cleared: Vec::new(),
-            level: config.gamemode.start_level,
+            level: gamemode.start_level,
             score: 0,
             consecutive_line_clears: 0,
             back_to_back_special_clears: 0,
+
             config,
+
+            time_started,
+            gamemode,
         }
     }
 
-    pub fn finished(&self) -> Option<bool> {
+    pub fn finished(&self) -> Option<Result<(), GameOver>> {
         self.finished
     }
 
     pub fn state(&self) -> GameState {
         GameState {
-            // TODO: Return current GameState, timeinterval (so we can render e.g. lineclears with intermediate states).
             board: &self.board,
             active_piece: self.active_piece_data.map(|apd| apd.0),
             next_pieces: &self.next_pieces,
@@ -501,6 +527,8 @@ impl Game {
             level: self.level,
             score: self.score,
             time_updated: self.time_updated,
+            time_started: self.time_started,
+            gamemode: &self.gamemode,
         }
     }
 
@@ -512,17 +540,14 @@ impl Game {
         &mut self,
         mut new_button_state: Option<ButtonsPressed>,
         update_time: Instant,
-    ) -> Vec<(Instant, FeedbackEvent)> {
-        // TODO: This may go away once internal timeline handling is refactored (less depenent on "real-world" `Instant`).
-        assert!(
-            self.time_updated <= update_time,
-            "cannot handle event lying in the past"
-        );
+    ) -> Result<Vec<(Instant, FeedbackEvent)>, bool> {
         // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
         let mut feedback_events = Vec::new();
         // Handle game over: return immediately.
         if self.finished.is_some() {
-            return feedback_events;
+            return Err(true);
+        } else if self.time_updated <= update_time {
+            return Err(false);
         }
         // We linearly process all events until we reach the update time.
         'work_through_events: loop {
@@ -545,7 +570,7 @@ impl Game {
                     Ok(new_feedback_events) => {
                         feedback_events.extend(new_feedback_events);
                         // Check if game has to end.
-                        if let Some(limit) = self.config.gamemode.limit {
+                        if let Some(limit) = self.gamemode.limit {
                             let goal_achieved = match limit {
                                 MeasureStat::Lines(lines) => lines <= self.lines_cleared.len(),
                                 MeasureStat::Level(level) => level <= self.level,
@@ -554,19 +579,19 @@ impl Game {
                                     pieces <= self.pieces_played.iter().sum()
                                 }
                                 MeasureStat::Time(timer) => {
-                                    timer <= self.time_updated - self.config.time_started
+                                    timer <= self.time_updated - self.time_started
                                 }
                             };
                             if goal_achieved {
                                 // Game Completed.
-                                self.finished = Some(true);
+                                self.finished = Some(Ok(()));
                                 break 'work_through_events;
                             }
                         }
                     }
-                    Err(GameOverError::BlockOut | GameOverError::LockOut) => {
+                    Err(gameover) => {
                         // Game Over.
-                        self.finished = Some(false);
+                        self.finished = Some(Err(gameover));
                         break 'work_through_events;
                     }
                 }
@@ -585,7 +610,7 @@ impl Game {
                 }
             }
         }
-        feedback_events
+        Ok(feedback_events)
     }
 
     fn process_input(&mut self, new_buttons_pressed: ButtonsPressed, update_time: Instant) {
@@ -664,7 +689,7 @@ impl Game {
         &mut self,
         event: Event,
         event_time: Instant,
-    ) -> Result<Vec<(Instant, FeedbackEvent)>, GameOverError> {
+    ) -> Result<Vec<(Instant, FeedbackEvent)>, GameOver> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
         // TODO: Remove debug.
@@ -686,7 +711,7 @@ impl Game {
                 }
                 // Increment level if 10 lines cleared.
                 if self.lines_cleared.len() % 10 == 0 {
-                    self.level += 1;
+                    self.level = self.level.saturating_add(1);
                 }
                 self.events
                     .insert(Event::Spawn, event_time + self.config.appearance_delay);
@@ -715,7 +740,7 @@ impl Game {
                 let next_piece = self.config.rotation_system.place_initial(tetromino);
                 // Newly spawned piece conflicts with board - Game over.
                 if !next_piece.fits(&self.board) {
-                    return Err(GameOverError::BlockOut);
+                    return Err(GameOver::BlockOut);
                 }
                 self.pieces_played[<usize>::from(tetromino)] += 1;
                 self.events.insert(Event::Fall, event_time);
@@ -729,7 +754,7 @@ impl Game {
                     .iter()
                     .any(|((_, y), _)| *y >= Self::SKYLINE)
                 {
-                    return Err(GameOverError::LockOut);
+                    return Err(GameOver::LockOut);
                 }
                 feedback_events.push((event_time, FeedbackEvent::PieceLocked(prev_piece)));
                 // Pre-save whether piece was spun into lock position.
@@ -767,7 +792,7 @@ impl Game {
                     } else {
                         self.back_to_back_special_clears = 0;
                     }
-                    let score_bonus = (10 + self.level - 1)
+                    let score_bonus = (10 + self.level.get() - 1)
                         * n_lines_cleared
                         * n_tiles_used
                         * if spin { 2 } else { 1 }
@@ -782,7 +807,10 @@ impl Game {
                         self.consecutive_line_clears,
                     );
                     feedback_events.push((event_time, yippie));
-                    feedback_events.push((event_time, FeedbackEvent::LineClears(lines_cleared)));
+                    feedback_events.push((
+                        event_time,
+                        FeedbackEvent::LineClears(lines_cleared, self.config.line_clear_delay),
+                    ));
                 } else {
                     self.consecutive_line_clears = 0;
                 }
@@ -1010,6 +1038,12 @@ impl Game {
                         .ground_time_left
                         .saturating_sub(current_ground_time);
                     let lock_timer = std::cmp::min(self.lock_delay(), remaining_ground_time);
+                    // TODO: Remove debug comments.
+                    // let dbgstr = format!("HEREEEEEEEEEEEEEEEEEEE {:?}", lock_timer);
+                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::cursor::MoveTo(0,0)).unwrap();
+                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)).unwrap();
+                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::style::Print(dbgstr)).unwrap();
+                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::cursor::MoveToNextLine(1)).unwrap();
                     self.events
                         .insert(Event::LockTimer, event_time + lock_timer);
                 }
@@ -1017,12 +1051,12 @@ impl Game {
             }
             // [4] No change to state or no active piece.
             (prev_piece_data, _next_piece_dat) => prev_piece_data.unzip().1,
-        } // NEW LOCKING DATA
+        }
     }
 
     #[rustfmt::skip]
     const fn drop_delay(&self) -> Duration {
-        Duration::from_nanos(match self.level {
+        Duration::from_nanos(match self.level.get() {
              1 => 1_000_000_000,
              2 =>   793_000_000,
              3 =>   617_796_000,
@@ -1047,7 +1081,7 @@ impl Game {
 
     #[rustfmt::skip]
     const fn lock_delay(&self) -> Duration {
-        Duration::from_millis(match self.level {
+        Duration::from_millis(match self.level.get() {
             1..=19 => 500,
                 20 => 450,
                 21 => 400,

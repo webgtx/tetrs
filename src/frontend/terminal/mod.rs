@@ -114,6 +114,7 @@ impl<T: Write> TetrsTerminal<T> {
     pub fn run(&mut self) -> io::Result<String> {
         let mut menu_stack = Vec::new();
         menu_stack.push(Menu::Title);
+        // TODO: Remove this once menus are navigable.
         menu_stack.push(Menu::Game(
             Box::new(Game::with_gamemode(
                 Gamemode::custom(
@@ -127,8 +128,8 @@ impl<T: Write> TetrsTerminal<T> {
             )),
             Duration::ZERO,
             Instant::now(),
-        )); // TODO: Remove this once menus are navigable.
-            // Preparing main application loop.
+        ));
+        // Preparing main application loop.
         let msg = loop {
             // Retrieve active menu, stop application if stack is empty.
             let Some(screen) = menu_stack.last_mut() else {
@@ -250,19 +251,23 @@ impl<T: Write> TetrsTerminal<T> {
                             instant - *duration_paused_total,
                             game.state().time_updated,
                         ); // Make sure button press
-                        let new_feedback_events = game.update(Some(buttons_pressed), instant);
+                           // SAFETY: We know game is not over and
+                        let new_feedback_events =
+                            game.update(Some(buttons_pressed), instant).unwrap();
                         feedback_events.extend(new_feedback_events);
                         continue 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         let now = Instant::now();
-                        let new_feedback_events = game.update(None, now - *duration_paused_total);
+                        // TODO: SAFETY.
+                        let new_feedback_events =
+                            game.update(None, now - *duration_paused_total).unwrap();
                         feedback_events.extend(new_feedback_events);
                         break 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        // TODO: SAFETY?
-                        unreachable!("game loop RecvTimeoutError::Disconnected");
+                        // panic!("game loop RecvTimeoutError::Disconnected");
+                        break 'render_loop MenuUpdate::Push(Menu::Pause);
                     }
                 };
             }
@@ -275,6 +280,8 @@ impl<T: Write> TetrsTerminal<T> {
                 board,
                 active_piece,
                 next_pieces,
+                time_started,
+                gamemode,
             } = game.state();
             let mut temp_board = board.clone();
             if let Some(active_piece) = active_piece {
@@ -283,8 +290,8 @@ impl<T: Write> TetrsTerminal<T> {
                 }
             }
             self.term
-                .queue(terminal::Clear(terminal::ClearType::All))?
-                .queue(cursor::MoveTo(0, 0))?;
+                .queue(cursor::MoveTo(0, 1))?
+                .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?;
             self.term
                 .queue(style::Print("   +--------------------+"))?
                 .queue(cursor::MoveToNextLine(1))?;
@@ -317,10 +324,13 @@ impl<T: Write> TetrsTerminal<T> {
             self.term
                 .queue(style::Print(format!(
                     "   {:?}",
-                    time_updated.saturating_duration_since(game.config().time_started)
+                    time_updated.saturating_duration_since(game.state().time_started)
                 )))?
                 .queue(cursor::MoveToNextLine(1))?;
             // TODO: Do something with feedback events.
+            if !feedback_events.is_empty() {
+                feed_evt_msg_buf.push_front("---".to_string());
+            }
             for (_, feedback_event) in feedback_events {
                 let str = match feedback_event {
                     FeedbackEvent::Accolade(
@@ -352,7 +362,7 @@ impl<T: Write> TetrsTerminal<T> {
                         txts.join(" ")
                     }
                     FeedbackEvent::PieceLocked(_) => continue,
-                    FeedbackEvent::LineClears(_) => continue,
+                    FeedbackEvent::LineClears(..) => continue,
                     FeedbackEvent::HardDrop(_, _) => continue,
                     FeedbackEvent::Debug(s) => s,
                 };
@@ -368,7 +378,7 @@ impl<T: Write> TetrsTerminal<T> {
             self.term.flush()?;
             // Exit if game ended
             if let Some(good_end) = game.finished() {
-                let menu = if good_end {
+                let menu = if good_end.is_ok() {
                     Menu::GameComplete
                 } else {
                     Menu::GameOver

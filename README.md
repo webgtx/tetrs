@@ -1,6 +1,6 @@
 # tetrs
 Tetromino game remake for the console.
 
-# TODO: How to run
-
-- dependency [device_query](<https://crates.io/crates/device_query>): run `sudo apt install libx11-dev`
+# How to play
+- If there's a release for your platform available, download it and run it in your favourite terminal emulator.
+- You can easily compile it yourself if you have Rust installed by cloning this repo and running `cargo run`.
