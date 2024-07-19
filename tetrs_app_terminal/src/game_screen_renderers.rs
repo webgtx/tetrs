@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    fmt::Debug,
     io::{self, Write},
     time::Instant,
 };
@@ -10,34 +11,17 @@ use tetrs_lib::{FeedbackEvent, Game, GameStateView};
 use crate::terminal_tetrs::TerminalTetrs;
 
 #[derive(Eq, PartialEq, Clone, Hash, Default, Debug)]
-pub struct GameRenderer {
+pub struct DebugRenderer {
     feedback_event_buffer: VecDeque<(Instant, FeedbackEvent)>,
 }
 
-impl GameRenderer {
-    pub fn render(
-        &mut self,
-        ctx: &mut TerminalTetrs<impl Write>,
-        game: &mut Game,
-        new_feedback_events: Vec<(Instant, FeedbackEvent)>,
-    ) -> io::Result<()> {
-        let (WIDTH, HEIGHT) = terminal::size()?;
-        let GameStateView {
-            lines_cleared,
-            level,
-            score,
-            time_updated,
-            board,
-            active_piece,
-            next_pieces,
-            pieces_played,
-            time_started,
-            gamemode,
-        } = game.state();
-        Ok(())
-    }
+#[derive(Eq, PartialEq, Clone, Hash, Default, Debug)]
+pub struct UnicodeRenderer {
+    event_buffer: VecDeque<(Instant, FeedbackEvent)>,
+}
 
-    pub fn render_dbg(
+impl DebugRenderer {
+    pub fn render(
         &mut self,
         ctx: &mut TerminalTetrs<impl Write>,
         game: &mut Game,
@@ -156,6 +140,31 @@ impl GameRenderer {
         }
         // Execute draw.
         ctx.term.flush()?;
+        Ok(())
+    }
+}
+
+impl UnicodeRenderer {
+    // NOTE: (note) what is the concept of having an ADT but some functions are only defined on some variants (that may contain record data)?
+    pub fn render(
+        &mut self,
+        ctx: &mut TerminalTetrs<impl Write>,
+        game: &mut Game,
+        new_feedback_events: Vec<(Instant, FeedbackEvent)>,
+    ) -> io::Result<()> {
+        let (WIDTH, HEIGHT) = terminal::size()?;
+        let GameStateView {
+            lines_cleared,
+            level,
+            score,
+            time_updated,
+            board,
+            active_piece,
+            next_pieces,
+            pieces_played,
+            time_started,
+            gamemode,
+        } = game.state();
         Ok(())
     }
 }

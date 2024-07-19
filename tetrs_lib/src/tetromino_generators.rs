@@ -8,7 +8,6 @@ use rand::{
 
 use crate::Tetromino;
 
-// TODO: Derive `Default`?
 #[derive(Clone, Debug)]
 pub struct RandomGen {
     rng: ThreadRng,
@@ -34,7 +33,6 @@ impl Iterator for RandomGen {
     }
 }
 
-// TODO: Derive `Default`?
 #[derive(Clone, Debug)]
 pub struct BagGen {
     // INVARIANT: self.leftover.iter().sum::<u32>() > 0.
@@ -71,7 +69,6 @@ impl Iterator for BagGen {
     }
 }
 
-// TODO: Derive `Default`?
 #[derive(Clone, Debug)]
 pub struct TotalRelativeProbGen {
     rng: ThreadRng,
@@ -110,7 +107,6 @@ impl Iterator for TotalRelativeProbGen {
     }
 }
 
-// TODO: Derive `Default`?
 #[derive(Clone, Debug)]
 pub struct RecencyProbGen {
     rng: ThreadRng,

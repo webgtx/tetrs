@@ -13,15 +13,19 @@ use crossterm::{
 };
 use tetrs_lib::{Button, ButtonsPressed, Game, Gamemode, MeasureStat};
 
+use crate::game_screen_renderers::UnicodeRenderer;
 use crate::input_handler::{ButtonSignal, CT_Keycode, CrosstermHandler};
-use crate::game_renderer::GameRenderer;
 
-
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 enum Menu {
     Title,
     NewGame(Gamemode),
-    Game(Box<Game>, GameRenderer, Duration, Instant),
+    Game {
+        game: Box<Game>,
+        game_screen_renderer: UnicodeRenderer,
+        total_duration_paused: Duration,
+        last_paused: Instant,
+    },
     Pause, // TODO: Add information so game stats can be displayed here.
     GameOver,
     GameComplete,
@@ -32,7 +36,7 @@ enum Menu {
     ConfigureControls,
 }
 
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 enum MenuUpdate {
     Pop,
     Push(Menu),
@@ -106,8 +110,8 @@ impl<T: Write> TerminalTetrs<T> {
         let mut menu_stack = Vec::new();
         menu_stack.push(Menu::Title);
         // TODO: Remove this once menus are navigable.
-        menu_stack.push(Menu::Game(
-            Box::new(Game::with_gamemode(
+        menu_stack.push(Menu::Game {
+            game: Box::new(Game::with_gamemode(
                 Gamemode::custom(
                     "Debug".to_string(),
                     NonZeroU32::MIN,
@@ -117,10 +121,10 @@ impl<T: Write> TerminalTetrs<T> {
                 ),
                 Instant::now(),
             )),
-            GameRenderer::default(),
-            Duration::ZERO,
-            Instant::now(),
-        ));
+            game_screen_renderer: UnicodeRenderer::default(),
+            total_duration_paused: Duration::ZERO,
+            last_paused: Instant::now(),
+        });
         // menu_stack.push(Menu::Game(
         //     Box::new(Game::with_gamemode(Gamemode::master(), Instant::now())),
         //     Duration::ZERO,
@@ -136,9 +140,12 @@ impl<T: Write> TerminalTetrs<T> {
             let menu_update = match screen {
                 Menu::Title => self.menu_title(),
                 Menu::NewGame(gamemode) => self.menu_newgame(gamemode),
-                Menu::Game(game, renderer, total_duration_paused, last_paused) => {
-                    self.menu_game(game, renderer, total_duration_paused, last_paused)
-                }
+                Menu::Game {
+                    game,
+                    game_screen_renderer: renderer,
+                    total_duration_paused,
+                    last_paused,
+                } => self.menu_game(game, renderer, total_duration_paused, last_paused),
                 Menu::Pause => self.menu_pause(),
                 Menu::GameOver => self.menu_gameover(),
                 Menu::GameComplete => self.menu_gamecomplete(),
@@ -212,12 +219,12 @@ impl<T: Write> TerminalTetrs<T> {
     fn menu_game(
         &mut self,
         game: &mut Game,
-        renderer: &mut GameRenderer,
-        duration_paused_total: &mut Duration,
+        game_screen_renderer: &mut UnicodeRenderer,
+        total_duration_paused: &mut Duration,
         time_paused: &mut Instant,
     ) -> io::Result<MenuUpdate> {
         let time_unpaused = Instant::now();
-        *duration_paused_total += time_unpaused.saturating_duration_since(*time_paused);
+        *total_duration_paused += time_unpaused.saturating_duration_since(*time_paused);
         // Prepare channel with which to communicate `Button` inputs / game interrupt.
         let mut buttons_pressed = ButtonsPressed::default();
         let (tx, rx) = mpsc::channel::<ButtonSignal>();
@@ -244,7 +251,7 @@ impl<T: Write> TerminalTetrs<T> {
                     Ok(Some((instant, button, button_state))) => {
                         buttons_pressed[button] = button_state;
                         let instant = std::cmp::max(
-                            instant - *duration_paused_total,
+                            instant - *total_duration_paused,
                             game.state().time_updated,
                         ); // Make sure button press
                            // SAFETY: We know game is not over and
@@ -257,7 +264,7 @@ impl<T: Write> TerminalTetrs<T> {
                         let now = Instant::now();
                         // TODO: SAFETY.
                         let new_feedback_events =
-                            game.update(None, now - *duration_paused_total).unwrap();
+                            game.update(None, now - *total_duration_paused).unwrap();
                         feedback_events.extend(new_feedback_events);
                         break 'idle_loop;
                     }
@@ -268,7 +275,7 @@ impl<T: Write> TerminalTetrs<T> {
                 };
             }
             // TODO: Make this more elegantly modular.
-            renderer.render_dbg(self, game, feedback_events)?;
+            game_screen_renderer.render(self, game, feedback_events)?;
             // Exit if game ended
             if let Some(good_end) = game.finished() {
                 let menu = if good_end.is_ok() {

@@ -38,7 +38,7 @@ impl RotationSystem for Classic {
         };
         use Orientation::*;
         #[rustfmt::skip]
-        let offset = match new_piece.shape {
+        let kick = match new_piece.shape {
             Tetromino::O => (0, 0), // ⠶
             Tetromino::I => match old_piece.orientation {
                 N | S => (2, -1), // ⠤⠤ -> ⡇
@@ -55,7 +55,7 @@ impl RotationSystem for Classic {
                 W => if right_rotation { (0, 1) } else { (0, 0) }         // ⠲⠂ <- ⠺  -> ⠴⠄ // ⠹  <-> ⠤⠆ // ⠼  <-> ⠦⠄
             },
         };
-        new_piece.fits_at(board, offset)
+        new_piece.fits_at(board, kick)
     }
 
     fn place_initial(&mut self, shape: Tetromino) -> ActivePiece {

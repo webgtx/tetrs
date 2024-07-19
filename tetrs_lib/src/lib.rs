@@ -1,6 +1,15 @@
 mod rotation_systems;
 mod tetromino_generators;
 
+/*
+## TODO:
+ * `fn drop_delay` curve could be tweaked.
+ * `fn lock_delay` curve could be tweaked.
+ * Gamemode "finesse" where you minimize `Finesse(u32)` for certain number of `Pieces(100)`.
+ * Gamemode "increment" where your time is short but can be regained with well-executed actions.
+ * Gamemode "???" where special, distinct powerups are triggered by different well-executed actions.
+ */
+
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -298,7 +307,7 @@ impl ActivePiece {
             .map(|(dx, dy)| ((x + dx, y + dy), tile_type_id))
     }
 
-    pub(crate) fn fits(&self, board: &Board) -> bool {
+    pub fn fits(&self, board: &Board) -> bool {
         self.tiles()
             .iter()
             .all(|&((x, y), _)| x < Game::WIDTH && y < Game::HEIGHT && board[y][x].is_none())
@@ -310,7 +319,7 @@ impl ActivePiece {
         new_piece.fits(board).then_some(new_piece)
     }
 
-    pub(crate) fn first_fit(
+    pub fn first_fit(
         &self,
         board: &Board,
         offsets: impl IntoIterator<Item = Offset>,
@@ -405,8 +414,6 @@ impl Gamemode {
             optimize: MeasureStat::Score(0),
         }
     }
-    // TODO: Gamemode pub fn increment() -> Self : regain time to keep playing...
-    // TODO: Gamemode pub fn finesse() -> Self : minimize Finesse(u64) for certain linecount...
 }
 
 impl PartialEq for Gamemode {
@@ -611,7 +618,7 @@ impl Game {
                 // Update button inputs.
                 if let Some(buttons_pressed) = new_button_state.take() {
                     if self.active_piece_data.is_some() {
-                        self.process_input(buttons_pressed, update_time);
+                        self.handle_input_events(buttons_pressed, update_time);
                     }
                     self.buttons_pressed = buttons_pressed;
                 } else {
@@ -622,7 +629,7 @@ impl Game {
         Ok(feedback_events)
     }
 
-    fn process_input(&mut self, new_buttons_pressed: ButtonsPressed, update_time: Instant) {
+    fn handle_input_events(&mut self, new_buttons_pressed: ButtonsPressed, update_time: Instant) {
         #[allow(non_snake_case)]
         let [mL0, mR0, rL0, rR0, rA0, dS0, dH0] = self.buttons_pressed;
         #[allow(non_snake_case)]
@@ -701,11 +708,6 @@ impl Game {
     ) -> Result<Vec<(Instant, FeedbackEvent)>, GameOver> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
-        // TODO: Remove debug.
-        // feedback_events.push((
-        //     event_time,
-        //     FeedbackEvent::Debug(format!("{event:?} at {event_time:?}")),
-        // ));
         let prev_piece_data = self.active_piece_data;
         let prev_piece = prev_piece_data.unzip().0;
         let next_piece = match event {
@@ -922,56 +924,59 @@ impl Game {
                 None
             }
         };
-        let next_piece_dat =
-            next_piece.map(|piece| (piece, piece.fits_at(&self.board, (0, -1)).is_none()));
-        let next_locking_data =
-            self.calculate_locking_data(event, event_time, prev_piece_data, next_piece_dat);
-        self.active_piece_data = next_piece.zip(next_locking_data);
+        self.active_piece_data = next_piece.map(|next_piece| {
+            (
+                next_piece,
+                self.calculate_locking_data(
+                    event,
+                    event_time,
+                    prev_piece_data,
+                    next_piece,
+                    next_piece.fits_at(&self.board, (0, -1)).is_none(),
+                ),
+            )
+        });
         Ok(feedback_events)
     }
 
-    // THIS is, by far, the ugliest part of this entire game. For the love of what's good, I hope this code can someday be surgically removed and replaced with an elegant alternative.
+    // TODO: THIS is, by far, the ugliest part of this entire program. For the love of what's good, I hope this code can someday be surgically excised and drop-in replaced with elegant code.
     fn calculate_locking_data(
         &mut self,
         event: Event,
         event_time: Instant,
         prev_piece_data: Option<(ActivePiece, LockingData)>,
-        next_piece_dat: Option<(ActivePiece, bool)>,
-    ) -> Option<LockingData> {
+        next_piece: ActivePiece,
+        touches_ground: bool,
+    ) -> LockingData {
         /*
         Table (touches_ground):
         | ∅t0 !t1  :  [1] init locking data
         | ∅t0  t1  :  [3.1] init locking data, track touchdown etc., add LockTimer
-        | ∅t0 ∅t1  :  [4]  -
         | !t0 !t1  :  [4]  -
         | !t0  t1  :  [3.2] track touchdown etc., add LockTimer
-        | !t0 ∅t1  :  [4]  -
         |  t0 !t1  :  [2] track liftoff etc., RMV LockTimer
         |  t0  t1  :  [3.3] upon move/rot. add LockTimer
-        |  t0 ∅t1  :  [4]  -
         */
-        match (prev_piece_data, next_piece_dat) {
+        match (prev_piece_data, touches_ground) {
             // [1] Newly spawned piece does not touch ground.
-            (None, Some((next_piece, false))) => Some(LockingData {
+            (None, false) => LockingData {
                 touches_ground: false,
                 last_touchdown: None,
                 last_liftoff: Some(event_time),
                 ground_time_left: self.config.ground_time_max,
                 lowest_y: next_piece.pos.1,
-            }),
+            },
             // [2] Active piece lifted off the ground.
-            (Some((_prev_piece, prev_locking_data)), Some((_next_piece, false)))
-                if prev_locking_data.touches_ground =>
-            {
+            (Some((_prev_piece, prev_locking_data)), false) if prev_locking_data.touches_ground => {
                 self.events.remove(&Event::LockTimer);
-                Some(LockingData {
+                LockingData {
                     touches_ground: false,
                     last_liftoff: Some(event_time),
                     ..prev_locking_data
-                })
+                }
             }
             // [3] A piece is on the ground. Complex update to locking values.
-            (prev_piece_data, Some((next_piece, true))) => {
+            (prev_piece_data, true) => {
                 let next_locking_data = match prev_piece_data {
                     // If previous piece exists and next piece hasn't reached newest low (i.e. not a reset situation).
                     Some((_prev_piece, prev_locking_data))
@@ -1054,23 +1059,16 @@ impl Game {
                         .ground_time_left
                         .saturating_sub(current_ground_time);
                     let lock_timer = std::cmp::min(self.lock_delay(), remaining_ground_time);
-                    // TODO: Remove debug.
-                    // let dbgstr = format!("HEREEEEEEEEEEEEEEEEEEE {:?}", lock_timer);
-                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::cursor::MoveTo(0,0)).unwrap();
-                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)).unwrap();
-                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::style::Print(dbgstr)).unwrap();
-                    // crossterm::ExecutableCommand::execute(&mut std::io::stderr(), crossterm::cursor::MoveToNextLine(1)).unwrap();
                     self.events
                         .insert(Event::LockTimer, event_time + lock_timer);
                 }
-                Some(next_locking_data)
+                next_locking_data
             }
-            // [4] No change to state or no active piece.
-            (prev_piece_data, _next_piece_dat) => prev_piece_data.unzip().1,
+            // [4] No change to state (afloat before and after).
+            (Some((_prev_piece, prev_locking_data)), _next_piece_dat) => prev_locking_data,
         }
     }
 
-    // TODO: This curve could be tweaked.
     #[rustfmt::skip]
     const fn drop_delay(&self) -> Duration {
         Duration::from_nanos(match self.level.get() {
@@ -1096,7 +1094,6 @@ impl Game {
         })
     }
 
-    // TODO: This curve could be tweaked.
     #[rustfmt::skip]
     const fn lock_delay(&self) -> Duration {
         Duration::from_millis(match self.level.get() {
@@ -1116,7 +1113,7 @@ impl Game {
     }
 }
 
-pub(crate) fn add((x0, y0): Coord, (x1, y1): Offset) -> Option<Coord> {
+pub fn add((x0, y0): Coord, (x1, y1): Offset) -> Option<Coord> {
     Some((x0.checked_add_signed(x1)?, y0.checked_add_signed(y1)?))
 }
 
