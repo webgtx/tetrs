@@ -492,7 +492,7 @@ impl Game {
             appearance_delay: Duration::from_millis(100),
             delayed_auto_shift: Duration::from_millis(200),
             auto_repeat_rate: Duration::from_millis(50),
-            soft_drop_factor: 12.0,
+            soft_drop_factor: 15.0,
             hard_drop_delay: Duration::from_micros(100),
             ground_time_max: Duration::from_millis(2250),
             line_clear_delay: Duration::from_millis(200),

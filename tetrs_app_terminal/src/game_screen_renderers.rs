@@ -12,8 +12,7 @@ use crossterm::{
     terminal, QueueableCommand,
 };
 use tetrs_lib::{
-    ActivePiece, Button, Coord, FeedbackEvent, Game, GameStateView, MeasureStat, Tetromino,
-    TileTypeID,
+    Button, Coord, FeedbackEvent, Game, GameStateView, MeasureStat, Tetromino, TileTypeID,
 };
 
 use crate::terminal_tetrs::TerminalTetrs;
@@ -159,8 +158,8 @@ impl GameScreenRenderer for DebugRenderer {
 }
 
 impl UnicodeRenderer {
-    const BOARD_X: usize  = 25;
-    const BOARD_Y: usize  = 0;
+    const BOARD_X: usize = 25;
+    const BOARD_Y: usize = 0;
 }
 
 impl GameScreenRenderer for UnicodeRenderer {
@@ -292,7 +291,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                 .queue(cursor::MoveToNextLine(1))?;
         }
         // Board: helpers.
-        // TODO: Old tile colors. Move somewhere?
+        // TODO: Old tile colors.
         let _tile_color = |tile: TileTypeID| match tile.get() {
             1 => Color::Yellow,
             2 => Color::Cyan,
@@ -419,9 +418,6 @@ impl GameScreenRenderer for UnicodeRenderer {
                         ctx.term
                             .queue(cursor::MoveTo(u16::try_from(UnicodeRenderer::BOARD_X).unwrap(), u16::try_from(UnicodeRenderer::BOARD_Y + (Game::SKYLINE - *line_y)).unwrap()))?
                             .queue(style::PrintStyledContent(line_clear_frames[idx].with(Color::White)))?;
-                    }
-                    if percent < 0.1 {
-
                     }
                 }
                 FeedbackEvent::HardDrop(_top_piece, bottom_piece) => {
