@@ -158,6 +158,11 @@ impl GameScreenRenderer for DebugRenderer {
     }
 }
 
+impl UnicodeRenderer {
+    const BOARD_X: usize  = 25;
+    const BOARD_Y: usize  = 0;
+}
+
 impl GameScreenRenderer for UnicodeRenderer {
     // NOTE: (note) what is the concept of having an ADT but some functions are only defined on some variants (that may contain record data)?
     #[rustfmt::skip]
@@ -309,9 +314,8 @@ impl GameScreenRenderer for UnicodeRenderer {
             t => unimplemented!("formatting unknown tile id {t}"),
         };
         fn draw_board_tile(ctx: &mut TerminalTetrs<impl Write>, tile: &str, (x,y): Coord, color: Color) -> io::Result<()> {
-            let (board_x, board_y) = (25, 0);
             ctx.term
-                .queue(cursor::MoveTo(u16::try_from(board_x + 2*x).unwrap(), u16::try_from(board_y + (Game::SKYLINE - y)).unwrap()))?
+                .queue(cursor::MoveTo(u16::try_from(UnicodeRenderer::BOARD_X + 2*x).unwrap(), u16::try_from(UnicodeRenderer::BOARD_Y + (Game::SKYLINE - y)).unwrap()))?
                 .queue(style::PrintStyledContent(tile.with(color)))?;
             Ok(())
         }
@@ -388,8 +392,37 @@ impl GameScreenRenderer for UnicodeRenderer {
                         }
                     }
                 }
-                FeedbackEvent::LineClears(lines_cleard, line_clear_delay) => {
-                    /* TODO: Lineclear effect */
+                FeedbackEvent::LineClears(lines_cleared, line_clear_delay) => {
+                    // TODO: Locking animation polish.
+                    if line_clear_delay.is_zero() {
+                        *relevant = false;
+                    }
+                    let line_clear_frames = [
+                        "████████████████████",
+                        " ██████████████████ ",
+                        "  ████████████████  ",
+                        "   ██████████████   ",
+                        "    ████████████    ",
+                        "     ██████████     ",
+                        "      ████████      ",
+                        "       ██████       ",
+                        "        ████        ",
+                        "         ██         ",
+                    ];
+                    let percent = time_updated.saturating_duration_since(*event_time).as_secs_f64() / line_clear_delay.as_secs_f64();
+                    // SAFETY: `0.0 <= percent && percent <= 1.0`.
+                    let idx = if percent < 1.0 { unsafe { (10.0 * percent).to_int_unchecked::<usize>() } } else {
+                        *relevant = false;
+                        continue;
+                    };
+                    for line_y in lines_cleared {
+                        ctx.term
+                            .queue(cursor::MoveTo(u16::try_from(UnicodeRenderer::BOARD_X).unwrap(), u16::try_from(UnicodeRenderer::BOARD_Y + (Game::SKYLINE - *line_y)).unwrap()))?
+                            .queue(style::PrintStyledContent(line_clear_frames[idx].with(Color::White)))?;
+                    }
+                    if percent < 0.1 {
+
+                    }
                 }
                 FeedbackEvent::HardDrop(_top_piece, bottom_piece) => {
                     for ((x,y), tile_type_id) in bottom_piece.tiles() {
@@ -409,7 +442,10 @@ impl GameScreenRenderer for UnicodeRenderer {
                     opportunity
                 } => {
                     let mut strs = Vec::new();
-                    strs.push("<|".to_string());
+                    strs.push(">".to_string());
+                    if *perfect_clear {
+                        strs.push("PERFECT".to_string());
+                    }
                     if *spin {
                         strs.push(format!("{shape:?}-Spin"));
                     }
@@ -419,7 +455,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                         3 => "Triple",
                         4 => "Quadruple",
                         x => unreachable!("unexpected line clear count {x}"),
-                    };
+                    }.to_ascii_uppercase();
                     let excl = match opportunity {
                         1 => "'",
                         2 => "!",
@@ -430,9 +466,6 @@ impl GameScreenRenderer for UnicodeRenderer {
                     strs.push(format!("{accolade}{excl}"));
                     if *combo > 1 {
                         strs.push(format!("[{combo}.combo]"));
-                    }
-                    if *perfect_clear {
-                        strs.push("PERFECT.".to_string());
                     }
                     strs.push(format!("+{score_bonus}"));
                     self.accolades.push((*event_time, strs.join(" ")));

@@ -838,7 +838,6 @@ impl Game {
                 {
                     return Err(GameOver::LockOut);
                 }
-                feedback_events.push((event_time, FeedbackEvent::PieceLocked(prev_piece)));
                 // Pre-save whether piece was spun into lock position.
                 let spin = prev_piece.fits_at(&self.board, (0, 1)).is_none();
                 // Locking.
@@ -907,6 +906,7 @@ impl Game {
                     self.events
                         .insert(Event::Spawn, event_time + self.config.appearance_delay);
                 }
+                feedback_events.push((event_time, FeedbackEvent::PieceLocked(prev_piece)));
                 None
             }
             Event::LineClear => {
