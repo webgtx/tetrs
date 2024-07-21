@@ -139,7 +139,7 @@ impl RotationSystem for Okay {
                     N | S => if left { [( 0, 0), ( 0,-1), ( 1, 0), (-1,-1)].iter() }
                                 else { [( 1, 0), ( 1,-1), ( 0, 0), ( 0,-1)].iter() },
                     E | W => if left { [(-1, 0), ( 0, 0), (-1, 1), ( 0, 1)].iter() }
-                                else { [( 0, 0), (-1, 0), ( 0, 1), (-1, 1)].iter() },
+                                else { [( 0, 0), ( 0,-1), (-1, 0), ( 0, 1), (-1, 1)].iter() },
                 },
                 Tetromino::Z => {
                     let mx = match orientation {
