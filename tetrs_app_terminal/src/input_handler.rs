@@ -48,10 +48,15 @@ impl CrosstermHandler {
                     // Escape pressed: send interrupt.
                     Event::Key(KeyEvent {
                         code: CT_Keycode::Esc,
+                        kind: KeyEventKind::Press,
                         ..
                     }) => vec![None],
                     // Candidate key pressed.
-                    Event::Key(KeyEvent { code: key, .. }) => match keybinds.get(&key) {
+                    Event::Key(KeyEvent {
+                        code: key,
+                        kind: KeyEventKind::Press,
+                        ..
+                    }) => match keybinds.get(&key) {
                         // Binding found: send button press.
                         Some(&button) => vec![
                             Some((instant, button, true)),
