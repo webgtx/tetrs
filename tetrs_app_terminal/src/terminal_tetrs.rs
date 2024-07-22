@@ -53,6 +53,7 @@ pub struct Settings {
     pub game_fps: f64,
     pub keybinds: HashMap<CT_Keycode, Button>,
     cache_custom_game: Gamemode,
+    kitty_enabled: bool,
 }
 
 impl std::fmt::Display for Menu {
@@ -83,8 +84,10 @@ pub struct TerminalTetrs<T: Write> {
 impl<T: Write> Drop for TerminalTetrs<T> {
     fn drop(&mut self) {
         // Console epilogue: de-initialization.
-        // TODO: Keyboard bug stuff.
-        // let _ = self.term.execute(event::PopKeyboardEnhancementFlags);
+        // TODO FIXME BUG: There's this horrible bug where the keyboard flags pop incorrectly: if I press escape in the pause menu, it resumes the game, but when I release escape during the game immediately after it interprets this as a "Press" as well, pausing again.
+        if self.settings.kitty_enabled {
+            let _ =self.term.execute(event::PopKeyboardEnhancementFlags);
+        }
         let _ = terminal::disable_raw_mode();
         // let _ = self.term.execute(terminal::LeaveAlternateScreen); // NOTE: This is only manually done at the end of `run`, that way backtraces are not erased automatically here.
         let _ = self.term.execute(style::ResetColor);
@@ -99,10 +102,13 @@ impl<T: Write> TerminalTetrs<T> {
         let _ = terminal.execute(terminal::SetTitle("Tetrs"));
         let _ = terminal.execute(cursor::Hide);
         let _ = terminal::enable_raw_mode();
-        // TODO: Keyboard bug stuff.
-        // let _ = terminal.execute(event::PushKeyboardEnhancementFlags(
-        //     event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
-        // ));
+        let kitty_enabled = terminal::supports_keyboard_enhancement().unwrap_or(false);
+        if kitty_enabled {
+            // TODO: This is kinda iffy. Do we need all flags? What undesirable effects might there be?
+            let _ = terminal.execute(event::PushKeyboardEnhancementFlags(
+                event::KeyboardEnhancementFlags::all(),
+            ));
+        }
         // TODO: Store different keybind mappings somewhere and get default from there.
         let ct_keybinds = HashMap::from([
             (CT_Keycode::Left, Button::MoveLeft),
@@ -122,6 +128,7 @@ impl<T: Write> TerminalTetrs<T> {
                 None,
                 MeasureStat::Time(Duration::ZERO),
             ),
+            kitty_enabled,
         };
         Self {
             term: terminal,
@@ -278,7 +285,7 @@ impl<T: Write> TerminalTetrs<T> {
                 }
                 Event::Key(KeyEvent {
                     code: CT_Keycode::Esc,
-                    kind: Press | Repeat,
+                    kind: Press,
                     ..
                 }) => break Ok(MenuUpdate::Pop),
                 // Select next menu.
@@ -407,14 +414,7 @@ impl<T: Write> TerminalTetrs<T> {
         // Prepare channel with which to communicate `Button` inputs / game interrupt.
         let mut buttons_pressed = ButtonsPressed::default();
         let (tx, rx) = mpsc::channel::<ButtonSignal>();
-        let supports_kitty = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
-            && self
-                .term
-                .execute(event::PushKeyboardEnhancementFlags(
-                    event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
-                ))
-                .is_ok();
-        let _input_handler = CrosstermHandler::new(&tx, &self.settings.keybinds, supports_kitty);
+        let _input_handler = CrosstermHandler::new(&tx, &self.settings.keybinds, self.settings.kitty_enabled);
         // Game Loop
         let time_game_resumed = Instant::now();
         *total_duration_paused += time_game_resumed.saturating_duration_since(*time_paused);
@@ -470,10 +470,6 @@ impl<T: Write> TerminalTetrs<T> {
             game_screen_renderer.render(self, game, new_feedback_events)?;
         };
         *time_paused = Instant::now();
-        // TODO FIXME BUG: There's this horrible bug where the keyboard flags pop incorrectly: if I press escape in the pause menu, it resumes the game, but when I release escape during the game immediately after it interprets this as a "Press" as well, pausing again.
-        if supports_kitty {
-            self.term.execute(event::PopKeyboardEnhancementFlags)?;
-        }
         Ok(next_menu)
     }
 
