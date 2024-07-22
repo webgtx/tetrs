@@ -83,6 +83,8 @@ pub struct TerminalTetrs<T: Write> {
 impl<T: Write> Drop for TerminalTetrs<T> {
     fn drop(&mut self) {
         // Console epilogue: de-initialization.
+        // TODO: Keyboard bug stuff.
+        // let _ = self.term.execute(event::PopKeyboardEnhancementFlags);
         let _ = terminal::disable_raw_mode();
         // let _ = self.term.execute(terminal::LeaveAlternateScreen); // NOTE: This is only manually done at the end of `run`, that way backtraces are not erased automatically here.
         let _ = self.term.execute(style::ResetColor);
@@ -97,6 +99,10 @@ impl<T: Write> TerminalTetrs<T> {
         let _ = terminal.execute(terminal::SetTitle("Tetrs"));
         let _ = terminal.execute(cursor::Hide);
         let _ = terminal::enable_raw_mode();
+        // TODO: Keyboard bug stuff.
+        // let _ = terminal.execute(event::PushKeyboardEnhancementFlags(
+        //     event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+        // ));
         // TODO: Store different keybind mappings somewhere and get default from there.
         let ct_keybinds = HashMap::from([
             (CT_Keycode::Left, Button::MoveLeft),
@@ -191,7 +197,10 @@ impl<T: Write> TerminalTetrs<T> {
                     menu_stack.pop();
                 }
                 MenuUpdate::Push(menu) => {
-                    if matches!(menu, Menu::Title | Menu::Game{ .. } | Menu::GameOver | Menu::GameComplete) {
+                    if matches!(
+                        menu,
+                        Menu::Title | Menu::Game { .. } | Menu::GameOver | Menu::GameComplete
+                    ) {
                         menu_stack.clear();
                     }
                     menu_stack.push(menu);
@@ -216,26 +225,42 @@ impl<T: Write> TerminalTetrs<T> {
                 console_width.saturating_sub(80) / 2,
                 console_height.saturating_sub(24) / 2,
             );
-            let names = selection.iter().map(|menu| menu.to_string());
+            let names = selection.iter().map(|menu| menu.to_string()).collect::<Vec<_>>();
             let menu_y = 24 / 3;
-            self.term
-                .queue(terminal::Clear(terminal::ClearType::All))?
-                .queue(MoveTo(w_x, w_y + menu_y))?
-                .queue(Print(format!(
-                    "{:^80}",
-                    format!("[ {} ]", current_menu_name.to_ascii_uppercase())
-                )))?;
-            for (i, name) in names.enumerate() {
+            if current_menu_name.is_empty() {
                 self.term
-                    .queue(MoveTo(w_x, w_y + menu_y + 2 + u16::try_from(i).unwrap()))?
+                    .queue(terminal::Clear(terminal::ClearType::All))?
+                    .queue(MoveTo(w_x, w_y + menu_y))?
+                    .queue(Print(format!("{:^80}", "▀█▀ ██ ▀█▀ █▀▀ ▄█▀")))?
+                    .queue(MoveTo(w_x, w_y + menu_y + 1))?
+                    .queue(Print(format!("{:^80}", "    █▄▄▄▄▄▄       ")))?;
+            } else {
+                self.term
+                    .queue(terminal::Clear(terminal::ClearType::All))?
+                    .queue(MoveTo(w_x, w_y + menu_y))?
                     .queue(Print(format!(
                         "{:^80}",
-                        if i == selected {
-                            format!(">>> {name} <<<")
-                        } else {
-                            name
-                        }
-                    )))?;
+                        format!("[ {} ]", current_menu_name.to_ascii_uppercase())
+                    )))?
+                    .queue(MoveTo(w_x, w_y + menu_y + 2))?
+                    .queue(Print(format!("{:^80}", "──────────────────────────")))?;
+            }
+            if names.is_empty() {self.term
+                .queue(MoveTo(w_x, w_y + menu_y + 5))?
+                .queue(Print(format!("{:^80}", "There isn't anything interesting here... (yet)")))?;
+            } else {
+                for (i, name) in names.into_iter().enumerate() {
+                    self.term
+                        .queue(MoveTo(w_x, w_y + menu_y + 4 + u16::try_from(i).unwrap()))?
+                        .queue(Print(format!(
+                            "{:^80}",
+                            if i == selected {
+                                format!(">>> {name} <<<")
+                            } else {
+                                name
+                            }
+                        )))?;
+                }
             }
             self.term.flush()?;
             // Wait for new input.
@@ -310,7 +335,7 @@ impl<T: Write> TerminalTetrs<T> {
             Menu::Scores,
             Menu::About,
         ];
-        self.generic_placeholder_widget("tetrs", selection)
+        self.generic_placeholder_widget("", selection)
     }
 
     fn newgame(&mut self, gamemode: &mut Gamemode) -> io::Result<MenuUpdate> {
@@ -383,11 +408,13 @@ impl<T: Write> TerminalTetrs<T> {
         let mut buttons_pressed = ButtonsPressed::default();
         let (tx, rx) = mpsc::channel::<ButtonSignal>();
         let supports_kitty = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
-            && self.term.execute(event::PushKeyboardEnhancementFlags(
-                event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
-            )).is_ok();
-        let _input_handler =
-            CrosstermHandler::new(&tx, &self.settings.keybinds, supports_kitty);
+            && self
+                .term
+                .execute(event::PushKeyboardEnhancementFlags(
+                    event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+                ))
+                .is_ok();
+        let _input_handler = CrosstermHandler::new(&tx, &self.settings.keybinds, supports_kitty);
         // Game Loop
         let time_game_resumed = Instant::now();
         *total_duration_paused += time_game_resumed.saturating_duration_since(*time_paused);
@@ -400,6 +427,9 @@ impl<T: Write> TerminalTetrs<T> {
                 } else {
                     Menu::GameOver
                 };
+                // TODO: Temporary writing current game to file.
+                let mut file = std::fs::File::create("./tetrs_last_game.txt")?;
+                file.write(format!("{game:#?}").as_bytes())?;
                 break MenuUpdate::Push(menu);
             }
             // Start next frame
@@ -418,21 +448,20 @@ impl<T: Write> TerminalTetrs<T> {
                         let instant = std::cmp::max(
                             instant - *total_duration_paused,
                             game.state().time_updated,
-                        ); // Make sure button press
-                           // SAFETY: We know game is not over and
-                        new_feedback_events
-                            .extend(game.update(Some(buttons_pressed), instant).unwrap());
+                        );
+                        if let Ok(evts) = game.update(Some(buttons_pressed), instant) {
+                            new_feedback_events.extend(evts);
+                        }
                         continue 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        let now = Instant::now();
-                        // TODO: SAFETY.
-                        new_feedback_events
-                            .extend(game.update(None, now - *total_duration_paused).unwrap());
+                        if let Ok(evts) = game.update(None, Instant::now() - *total_duration_paused) {
+                            new_feedback_events.extend(evts);
+                        }
                         break 'idle_loop;
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        // panic!("game loop RecvTimeoutError::Disconnected");
+                        // NOTE: We kind of rely on this not happening too often.
                         break 'render_loop MenuUpdate::Push(Menu::Pause);
                     }
                 };
@@ -441,6 +470,7 @@ impl<T: Write> TerminalTetrs<T> {
             game_screen_renderer.render(self, game, new_feedback_events)?;
         };
         *time_paused = Instant::now();
+        // TODO FIXME BUG: There's this horrible bug where the keyboard flags pop incorrectly: if I press escape in the pause menu, it resumes the game, but when I release escape during the game immediately after it interprets this as a "Press" as well, pausing again.
         if supports_kitty {
             self.term.execute(event::PopKeyboardEnhancementFlags)?;
         }
