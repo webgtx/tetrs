@@ -936,7 +936,8 @@ impl Game {
                     }
                 }
                 // Increment level if 10 lines cleared.
-                if self.config.gamemode.increment_level && self.state.lines_cleared.len() % 10 == 0 {
+                if self.config.gamemode.increment_level && self.state.lines_cleared.len() % 10 == 0
+                {
                     self.state.level = self.state.level.saturating_add(1);
                 }
                 self.state

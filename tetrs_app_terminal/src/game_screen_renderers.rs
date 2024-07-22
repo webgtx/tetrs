@@ -24,7 +24,8 @@ pub trait GameScreenRenderer {
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
     ) -> io::Result<()>
-    where T: Write;
+    where
+        T: Write;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -45,8 +46,10 @@ impl GameScreenRenderer for DebugRenderer {
         ctx: &mut TerminalTetrs<T>,
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
-    ) -> io::Result<()> 
-    where T: Write {
+    ) -> io::Result<()>
+    where
+        T: Write,
+    {
         // Draw game stuf
         let GameState {
             last_updated,
@@ -163,7 +166,9 @@ impl GameScreenRenderer for UnicodeRenderer {
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
     ) -> io::Result<()>
-        where T: Write {
+    where
+        T: Write,
+    {
         let (x_main, y_main) = TerminalTetrs::<T>::fetch_main_xy();
         let GameState {
             time_started,
@@ -348,7 +353,10 @@ impl GameScreenRenderer for UnicodeRenderer {
             .queue(terminal::Clear(terminal::ClearType::All))?;
         for (y_screen, str) in screen.iter().enumerate() {
             ctx.term
-                .queue(cursor::MoveTo(x_main, y_main + u16::try_from(y_screen).unwrap()))?
+                .queue(cursor::MoveTo(
+                    x_main,
+                    y_main + u16::try_from(y_screen).unwrap(),
+                ))?
                 .queue(Print(str))?;
         }
         // Board: helpers.

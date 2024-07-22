@@ -222,8 +222,8 @@ impl<T: Write> TerminalTetrs<T> {
         Ok(msg)
     }
 
-    pub(crate) fn fetch_main_xy() -> (u16,u16) {
-        let (w_console, h_console) = terminal::size().unwrap_or((0,0));
+    pub(crate) fn fetch_main_xy() -> (u16, u16) {
+        let (w_console, h_console) = terminal::size().unwrap_or((0, 0));
         (
             w_console.saturating_sub(Self::W_MAIN) / 2,
             h_console.saturating_sub(Self::H_MAIN) / 2,
@@ -272,7 +272,10 @@ impl<T: Write> TerminalTetrs<T> {
             } else {
                 for (i, name) in names.into_iter().enumerate() {
                     self.term
-                        .queue(MoveTo(x_main, y_main + y_selection + 4 + u16::try_from(i).unwrap()))?
+                        .queue(MoveTo(
+                            x_main,
+                            y_main + y_selection + 4 + u16::try_from(i).unwrap(),
+                        ))?
                         .queue(Print(format!(
                             "{:^w_main$}",
                             if i == selected {
@@ -392,9 +395,7 @@ impl<T: Write> TerminalTetrs<T> {
             self.term
                 .queue(terminal::Clear(terminal::ClearType::All))?
                 .queue(MoveTo(x_main, y_main + y_selection))?
-                .queue(Print(format!(
-                    "{:^w_main$}", "Start New Game"
-                )))?
+                .queue(Print(format!("{:^w_main$}", "Start New Game")))?
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
             // Render preset selection.
@@ -405,7 +406,10 @@ impl<T: Write> TerminalTetrs<T> {
                 .collect::<Vec<_>>();
             for (i, name) in names.into_iter().enumerate() {
                 self.term
-                    .queue(MoveTo(x_main, y_main + y_selection + 4 + 2 * u16::try_from(i).unwrap()))?
+                    .queue(MoveTo(
+                        x_main,
+                        y_main + y_selection + 4 + 2 * u16::try_from(i).unwrap(),
+                    ))?
                     .queue(Print(format!(
                         "{:^w_main$}",
                         if i == selected {
@@ -417,10 +421,13 @@ impl<T: Write> TerminalTetrs<T> {
             }
             // Render custom mode option.
             self.term
-                .queue(MoveTo(x_main, y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt-1).unwrap()))?
+                .queue(MoveTo(
+                    x_main,
+                    y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt - 1).unwrap(),
+                ))?
                 .queue(Print(format!(
                     "{:^w_main$}",
-                    if selected == selected_cnt-1 {
+                    if selected == selected_cnt - 1 {
                         if selected_custom == 0 {
                             ">▓▓> Custom Mode (*cycle 'limit' by hitting right more):"
                         } else {
@@ -431,14 +438,34 @@ impl<T: Write> TerminalTetrs<T> {
                     }
                 )))?;
             // Render custom mode stuff.
-            if selected == selected_cnt-1 {
+            if selected == selected_cnt - 1 {
                 let stats_str = [
-                    (1, format!("level start: {}", self.settings.custom_mode.start_level)),
-                    (2, format!("level increment: {}", self.settings.custom_mode.increment_level)),
+                    (
+                        1,
+                        format!("level start: {}", self.settings.custom_mode.start_level),
+                    ),
+                    (
+                        2,
+                        format!(
+                            "level increment: {}",
+                            self.settings.custom_mode.increment_level
+                        ),
+                    ),
                     (3, format!("limit: {:?}", self.settings.custom_mode.limit)),
-                ].map(|(j, stat_str)| if j == selected_custom { format!("▓▓{stat_str}") } else { stat_str }).join("    ");
+                ]
+                .map(|(j, stat_str)| {
+                    if j == selected_custom {
+                        format!("▓▓{stat_str}")
+                    } else {
+                        stat_str
+                    }
+                })
+                .join("    ");
                 self.term
-                    .queue(MoveTo(x_main + 16, y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt).unwrap()))?
+                    .queue(MoveTo(
+                        x_main + 16,
+                        y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt).unwrap(),
+                    ))?
                     .queue(Print(stats_str))?;
             }
             self.term.flush()?;
@@ -474,7 +501,12 @@ impl<T: Write> TerminalTetrs<T> {
                         self.settings.custom_mode.clone()
                     };
                     let now = Instant::now();
-                    break Ok(MenuUpdate::Push(Menu::Game { game: Box::new(Game::with_gamemode(mode, now)), game_screen_renderer: UnicodeRenderer::default(), total_duration_paused: Duration::ZERO, last_paused: now }));
+                    break Ok(MenuUpdate::Push(Menu::Game {
+                        game: Box::new(Game::with_gamemode(mode, now)),
+                        game_screen_renderer: UnicodeRenderer::default(),
+                        total_duration_paused: Duration::ZERO,
+                        last_paused: now,
+                    }));
                 }
                 // Move selector up or increase stat.
                 Event::Key(KeyEvent {
@@ -485,10 +517,12 @@ impl<T: Write> TerminalTetrs<T> {
                     if selected_custom > 0 {
                         match selected_custom {
                             1 => {
-                                self.settings.custom_mode.start_level = self.settings.custom_mode.start_level.saturating_add(1);
+                                self.settings.custom_mode.start_level =
+                                    self.settings.custom_mode.start_level.saturating_add(1);
                             }
                             2 => {
-                                self.settings.custom_mode.increment_level = !self.settings.custom_mode.increment_level;
+                                self.settings.custom_mode.increment_level =
+                                    !self.settings.custom_mode.increment_level;
                             }
                             3 => {
                                 match self.settings.custom_mode.limit {
@@ -507,9 +541,9 @@ impl<T: Write> TerminalTetrs<T> {
                                     Some(MeasureStat::Level(ref mut lvl)) => {
                                         *lvl = lvl.saturating_add(1);
                                     }
-                                    None => { }
+                                    None => {}
                                 };
-                            },
+                            }
                             _ => unreachable!(),
                         }
                     } else {
@@ -526,10 +560,14 @@ impl<T: Write> TerminalTetrs<T> {
                     if selected_custom > 0 {
                         match selected_custom {
                             1 => {
-                                self.settings.custom_mode.start_level = NonZeroU32::try_from(self.settings.custom_mode.start_level.get() - 1).unwrap_or(NonZeroU32::MIN);
+                                self.settings.custom_mode.start_level = NonZeroU32::try_from(
+                                    self.settings.custom_mode.start_level.get() - 1,
+                                )
+                                .unwrap_or(NonZeroU32::MIN);
                             }
                             2 => {
-                                self.settings.custom_mode.increment_level = !self.settings.custom_mode.increment_level;
+                                self.settings.custom_mode.increment_level =
+                                    !self.settings.custom_mode.increment_level;
                             }
                             3 => {
                                 match self.settings.custom_mode.limit {
@@ -546,11 +584,12 @@ impl<T: Write> TerminalTetrs<T> {
                                         *lns = lns.saturating_sub(5);
                                     }
                                     Some(MeasureStat::Level(ref mut lvl)) => {
-                                        *lvl = NonZeroU32::try_from(lvl.get() - 1).unwrap_or(NonZeroU32::MIN);
+                                        *lvl = NonZeroU32::try_from(lvl.get() - 1)
+                                            .unwrap_or(NonZeroU32::MIN);
                                     }
-                                    None => { }
+                                    None => {}
                                 };
-                            },
+                            }
                             _ => unreachable!(),
                         }
                     // Move gamemode selector
@@ -564,7 +603,7 @@ impl<T: Write> TerminalTetrs<T> {
                     kind: Press | Repeat,
                     ..
                 }) => {
-                    if selected == selected_cnt - 1 && selected_custom > 0{
+                    if selected == selected_cnt - 1 && selected_custom > 0 {
                         selected_custom += selected_custom_cnt - 1
                     }
                 }
@@ -578,11 +617,14 @@ impl<T: Write> TerminalTetrs<T> {
                     if selected == selected_cnt - 1 {
                         // If reached last stat, cycle through stats for limit.
                         if selected_custom == selected_custom_cnt - 1 {
-                            self.settings.custom_mode.limit = match self.settings.custom_mode.limit {
+                            self.settings.custom_mode.limit = match self.settings.custom_mode.limit
+                            {
                                 Some(MeasureStat::Time(_)) => Some(MeasureStat::Score(9000)),
                                 Some(MeasureStat::Score(_)) => Some(MeasureStat::Pieces(100)),
                                 Some(MeasureStat::Pieces(_)) => Some(MeasureStat::Lines(40)),
-                                Some(MeasureStat::Lines(_)) => Some(MeasureStat::Level(NonZeroU32::try_from(25).unwrap())),
+                                Some(MeasureStat::Lines(_)) => {
+                                    Some(MeasureStat::Level(NonZeroU32::try_from(25).unwrap()))
+                                }
                                 Some(MeasureStat::Level(_)) => None,
                                 None => Some(MeasureStat::Time(Duration::from_secs(120))),
                             };
