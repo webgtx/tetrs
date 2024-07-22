@@ -66,7 +66,7 @@ pub enum MeasureStat {
 pub struct Gamemode {
     pub name: String,
     pub start_level: NonZeroU32,
-    pub increase_level: bool,
+    pub increment_level: bool,
     pub limit: Option<MeasureStat>,
     pub optimize: MeasureStat,
 }
@@ -342,14 +342,14 @@ impl Gamemode {
     pub const fn custom(
         name: String,
         start_level: NonZeroU32,
-        increase_level: bool,
+        increment_level: bool,
         mode_limit: Option<MeasureStat>,
         optimization_goal: MeasureStat,
     ) -> Self {
         Self {
             name,
             start_level,
-            increase_level,
+            increment_level,
             limit: mode_limit,
             optimize: optimization_goal,
         }
@@ -360,7 +360,7 @@ impl Gamemode {
         Self {
             name: String::from("Marathon"),
             start_level: NonZeroU32::MIN,
-            increase_level: true,
+            increment_level: true,
             limit: Some(MeasureStat::Level(Game::LEVEL_20G.saturating_add(1))),
             optimize: MeasureStat::Score(0),
         }
@@ -371,7 +371,7 @@ impl Gamemode {
         Self {
             name: String::from("Sprint"),
             start_level,
-            increase_level: false,
+            increment_level: false,
             limit: Some(MeasureStat::Lines(40)),
             optimize: MeasureStat::Time(Duration::ZERO),
         }
@@ -382,7 +382,7 @@ impl Gamemode {
         Self {
             name: String::from("Ultra"),
             start_level,
-            increase_level: false,
+            increment_level: false,
             limit: Some(MeasureStat::Time(Duration::from_secs(3 * 60))),
             optimize: MeasureStat::Lines(0),
         }
@@ -393,7 +393,7 @@ impl Gamemode {
         Self {
             name: String::from("Master"),
             start_level: Game::LEVEL_20G,
-            increase_level: true,
+            increment_level: true,
             limit: Some(MeasureStat::Lines(300)),
             optimize: MeasureStat::Score(0),
         }
@@ -404,7 +404,7 @@ impl Gamemode {
         Self {
             name: String::from("Endless"),
             start_level: NonZeroU32::MIN,
-            increase_level: true,
+            increment_level: true,
             limit: None,
             optimize: MeasureStat::Pieces(0),
         }
@@ -414,7 +414,7 @@ impl Gamemode {
 impl PartialEq for Gamemode {
     fn eq(&self, other: &Self) -> bool {
         self.start_level == other.start_level
-            && self.increase_level == other.increase_level
+            && self.increment_level == other.increment_level
             && self.limit == other.limit
             && self.optimize == other.optimize
     }
@@ -936,7 +936,7 @@ impl Game {
                     }
                 }
                 // Increment level if 10 lines cleared.
-                if self.config.gamemode.increase_level && self.state.lines_cleared.len() % 10 == 0 {
+                if self.config.gamemode.increment_level && self.state.lines_cleared.len() % 10 == 0 {
                     self.state.level = self.state.level.saturating_add(1);
                 }
                 self.state

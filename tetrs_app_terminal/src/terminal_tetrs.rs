@@ -24,7 +24,7 @@ use crate::game_screen_renderers::{GameScreenRenderer, UnicodeRenderer};
 #[derive(Debug)]
 enum Menu {
     Title,
-    NewGame(Gamemode),
+    NewGame,
     Game {
         game: Box<Game>,
         game_screen_renderer: UnicodeRenderer,
@@ -52,7 +52,7 @@ enum MenuUpdate {
 pub struct Settings {
     pub game_fps: f64,
     pub keybinds: HashMap<CT_Keycode, Button>,
-    cache_custom_game: Gamemode,
+    custom_mode: Gamemode,
     kitty_enabled: bool,
 }
 
@@ -60,7 +60,7 @@ impl std::fmt::Display for Menu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
             Menu::Title => "Title Screen",
-            Menu::NewGame(_) => "New Game",
+            Menu::NewGame => "New Game",
             Menu::Game { game, .. } => &format!("Game: {}", game.config().gamemode.name),
             Menu::GameOver(_) => "Game Over",
             Menu::GameComplete(_) => "Game Completed",
@@ -96,6 +96,9 @@ impl<T: Write> Drop for TerminalTetrs<T> {
 }
 
 impl<T: Write> TerminalTetrs<T> {
+    pub const W_MAIN: u16 = 80;
+    pub const H_MAIN: u16 = 24;
+
     pub fn new(mut terminal: T, fps: u32) -> Self {
         // Console prologue: Initializion.
         let _ = terminal.execute(terminal::EnterAlternateScreen);
@@ -121,8 +124,8 @@ impl<T: Write> TerminalTetrs<T> {
         let settings = Settings {
             keybinds: ct_keybinds,
             game_fps: fps.into(),
-            cache_custom_game: Gamemode::custom(
-                "Custom, Unnamed".to_string(),
+            custom_mode: Gamemode::custom(
+                "Custom Mode".to_string(),
                 NonZeroU32::MIN,
                 true,
                 None,
@@ -182,7 +185,7 @@ impl<T: Write> TerminalTetrs<T> {
             // Open new menu screen, then store what it returns.
             let menu_update = match screen {
                 Menu::Title => self.title(),
-                Menu::NewGame(gamemode) => self.newgame(gamemode),
+                Menu::NewGame => self.newgame(),
                 Menu::Game {
                     game,
                     game_screen_renderer: renderer,
@@ -219,6 +222,14 @@ impl<T: Write> TerminalTetrs<T> {
         Ok(msg)
     }
 
+    pub(crate) fn fetch_main_xy() -> (u16,u16) {
+        let (w_console, h_console) = terminal::size().unwrap_or((0,0));
+        (
+            w_console.saturating_sub(Self::W_MAIN) / 2,
+            h_console.saturating_sub(Self::H_MAIN) / 2,
+        )
+    }
+
     fn generic_placeholder_widget(
         &mut self,
         current_menu_name: &str,
@@ -226,48 +237,44 @@ impl<T: Write> TerminalTetrs<T> {
     ) -> io::Result<MenuUpdate> {
         let mut selected = 0usize;
         loop {
-            // Draw menu.
-            let (console_width, console_height) = terminal::size()?;
-            let (w_x, w_y) = (
-                console_width.saturating_sub(80) / 2,
-                console_height.saturating_sub(24) / 2,
-            );
+            let w_main = Self::W_MAIN.into();
+            let (x_main, y_main) = Self::fetch_main_xy();
+            let y_selection = Self::H_MAIN / 3;
+            if current_menu_name.is_empty() {
+                self.term
+                    .queue(terminal::Clear(terminal::ClearType::All))?
+                    .queue(MoveTo(x_main, y_main + y_selection))?
+                    .queue(Print(format!("{:^w_main$}", "▀█▀ ██ ▀█▀ █▀▀ ▄█▀")))?
+                    .queue(MoveTo(x_main, y_main + y_selection + 1))?
+                    .queue(Print(format!("{:^w_main$}", "    █▄▄▄▄▄▄       ")))?;
+            } else {
+                self.term
+                    .queue(terminal::Clear(terminal::ClearType::All))?
+                    .queue(MoveTo(x_main, y_main + y_selection))?
+                    .queue(Print(format!(
+                        "{:^w_main$}",
+                        format!("[ {} ]", current_menu_name.to_ascii_uppercase())
+                    )))?
+                    .queue(MoveTo(x_main, y_main + y_selection + 2))?
+                    .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
+            }
             let names = selection
                 .iter()
                 .map(|menu| menu.to_string())
                 .collect::<Vec<_>>();
-            let menu_y = 24 / 3;
-            if current_menu_name.is_empty() {
-                self.term
-                    .queue(terminal::Clear(terminal::ClearType::All))?
-                    .queue(MoveTo(w_x, w_y + menu_y))?
-                    .queue(Print(format!("{:^80}", "▀█▀ ██ ▀█▀ █▀▀ ▄█▀")))?
-                    .queue(MoveTo(w_x, w_y + menu_y + 1))?
-                    .queue(Print(format!("{:^80}", "    █▄▄▄▄▄▄       ")))?;
-            } else {
-                self.term
-                    .queue(terminal::Clear(terminal::ClearType::All))?
-                    .queue(MoveTo(w_x, w_y + menu_y))?
-                    .queue(Print(format!(
-                        "{:^80}",
-                        format!("[ {} ]", current_menu_name.to_ascii_uppercase())
-                    )))?
-                    .queue(MoveTo(w_x, w_y + menu_y + 2))?
-                    .queue(Print(format!("{:^80}", "──────────────────────────")))?;
-            }
             if names.is_empty() {
                 self.term
-                    .queue(MoveTo(w_x, w_y + menu_y + 5))?
+                    .queue(MoveTo(x_main, y_main + y_selection + 5))?
                     .queue(Print(format!(
-                        "{:^80}",
-                        "There isn't anything interesting here... (yet)"
+                        "{:^w_main$}",
+                        "There isn't anything interesting implemented here... (yet)",
                     )))?;
             } else {
                 for (i, name) in names.into_iter().enumerate() {
                     self.term
-                        .queue(MoveTo(w_x, w_y + menu_y + 4 + u16::try_from(i).unwrap()))?
+                        .queue(MoveTo(x_main, y_main + y_selection + 4 + u16::try_from(i).unwrap()))?
                         .queue(Print(format!(
-                            "{:^80}",
+                            "{:^w_main$}",
                             if i == selected {
                                 format!(">>> {name} <<<")
                             } else {
@@ -308,7 +315,7 @@ impl<T: Write> TerminalTetrs<T> {
                 }
                 // Move selector up.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Up | CT_Keycode::Left,
+                    code: CT_Keycode::Up,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -318,7 +325,7 @@ impl<T: Write> TerminalTetrs<T> {
                 }
                 // Move selector down.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Down | CT_Keycode::Right,
+                    code: CT_Keycode::Down,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -344,15 +351,16 @@ impl<T: Write> TerminalTetrs<T> {
             [color="#007FFF"]
         */
         let selection = vec![
-            Menu::NewGame(self.settings.cache_custom_game.clone()),
+            Menu::NewGame,
             Menu::Options,
             Menu::Scores,
             Menu::About,
+            Menu::Quit("quit from title menu. Have a nice day!".to_string()),
         ];
         self.generic_placeholder_widget("", selection)
     }
 
-    fn newgame(&mut self, gamemode: &mut Gamemode) -> io::Result<MenuUpdate> {
+    fn newgame(&mut self) -> io::Result<MenuUpdate> {
         /* TODO: Newgame menu.
         NewGame
             -> { Game }
@@ -362,46 +370,233 @@ impl<T: Write> TerminalTetrs<T> {
 
         MenuUpdate::Pop
         */
-        let now = Instant::now();
-        let selection = vec![
-            Menu::Game {
-                game: Box::new(Game::with_gamemode(Gamemode::marathon(), now)),
-                game_screen_renderer: Default::default(),
-                total_duration_paused: Duration::ZERO,
-                last_paused: now,
-            },
-            Menu::Game {
-                game: Box::new(Game::with_gamemode(
-                    Gamemode::sprint(NonZeroU32::try_from(10).unwrap()),
-                    now,
-                )),
-                game_screen_renderer: Default::default(),
-                total_duration_paused: Duration::ZERO,
-                last_paused: now,
-            },
-            Menu::Game {
-                game: Box::new(Game::with_gamemode(
-                    Gamemode::ultra(NonZeroU32::try_from(10).unwrap()),
-                    now,
-                )),
-                game_screen_renderer: Default::default(),
-                total_duration_paused: Duration::ZERO,
-                last_paused: now,
-            },
-            Menu::Game {
-                game: Box::new(Game::with_gamemode(Gamemode::master(), now)),
-                game_screen_renderer: Default::default(),
-                total_duration_paused: Duration::ZERO,
-                last_paused: now,
-            },
-            Menu::Game {
-                game: Box::new(Game::with_gamemode(Gamemode::endless(), now)),
-                game_screen_renderer: Default::default(),
-                total_duration_paused: Duration::ZERO,
-                last_paused: now,
-            },
+        let preset_gamemodes = [
+            Gamemode::marathon(),
+            Gamemode::sprint(NonZeroU32::try_from(5).unwrap()),
+            Gamemode::ultra(NonZeroU32::try_from(5).unwrap()),
+            Gamemode::master(),
+            Gamemode::endless(),
         ];
-        self.generic_placeholder_widget("Start New Game", selection)
+        let mut selected = 0usize;
+        let mut selected_custom = 0usize;
+        // There are the preset gamemodes + custom gamemode.
+        let selected_cnt = preset_gamemodes.len() + 1;
+        // There are four columns for the custom stat selection.
+        let selected_custom_cnt = 4;
+        loop {
+            // First part: rendering the menu.
+            let w_main = Self::W_MAIN.into();
+            let (x_main, y_main) = Self::fetch_main_xy();
+            let y_selection = Self::H_MAIN / 3;
+            // Render menu title.
+            self.term
+                .queue(terminal::Clear(terminal::ClearType::All))?
+                .queue(MoveTo(x_main, y_main + y_selection))?
+                .queue(Print(format!(
+                    "{:^w_main$}", "Start New Game"
+                )))?
+                .queue(MoveTo(x_main, y_main + y_selection + 2))?
+                .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
+            // Render preset selection.
+            let names = preset_gamemodes
+                .iter()
+                .cloned()
+                .map(|gm| gm.name)
+                .collect::<Vec<_>>();
+            for (i, name) in names.into_iter().enumerate() {
+                self.term
+                    .queue(MoveTo(x_main, y_main + y_selection + 4 + 2 * u16::try_from(i).unwrap()))?
+                    .queue(Print(format!(
+                        "{:^w_main$}",
+                        if i == selected {
+                            format!(">>> {name} <<<")
+                        } else {
+                            name
+                        }
+                    )))?;
+            }
+            // Render custom mode option.
+            self.term
+                .queue(MoveTo(x_main, y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt-1).unwrap()))?
+                .queue(Print(format!(
+                    "{:^w_main$}",
+                    if selected == selected_cnt-1 {
+                        if selected_custom == 0 {
+                            ">▓▓> Custom Mode (*cycle 'limit' by hitting right more):"
+                        } else {
+                            ">  > Custom Mode (*cycle 'limit' by hitting right more):"
+                        }
+                    } else {
+                        "Custom Mode..."
+                    }
+                )))?;
+            // Render custom mode stuff.
+            if selected == selected_cnt-1 {
+                let stats_str = [
+                    (1, format!("level start: {}", self.settings.custom_mode.start_level)),
+                    (2, format!("level increment: {}", self.settings.custom_mode.increment_level)),
+                    (3, format!("limit: {:?}", self.settings.custom_mode.limit)),
+                ].map(|(j, stat_str)| if j == selected_custom { format!("▓▓{stat_str}") } else { stat_str }).join("    ");
+                self.term
+                    .queue(MoveTo(x_main + 16, y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt).unwrap()))?
+                    .queue(Print(stats_str))?;
+            }
+            self.term.flush()?;
+            // Wait for new input.
+            match event::read()? {
+                // Quit app.
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers: KeyModifiers::CONTROL,
+                    kind: Press | Repeat,
+                    state: _,
+                }) => {
+                    break Ok(MenuUpdate::Push(Menu::Quit(
+                        "app exited with ctrl-c".to_string(),
+                    )))
+                }
+                // Exit menu.
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Esc,
+                    kind: Press,
+                    ..
+                }) => break Ok(MenuUpdate::Pop),
+                // Try select mode.
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Enter,
+                    kind: Press,
+                    ..
+                }) => {
+                    let mode = if selected < selected_cnt - 1 {
+                        // SAFETY: Index is valid.
+                        preset_gamemodes.into_iter().nth(selected).unwrap()
+                    } else {
+                        self.settings.custom_mode.clone()
+                    };
+                    let now = Instant::now();
+                    break Ok(MenuUpdate::Push(Menu::Game { game: Box::new(Game::with_gamemode(mode, now)), game_screen_renderer: UnicodeRenderer::default(), total_duration_paused: Duration::ZERO, last_paused: now }));
+                }
+                // Move selector up or increase stat.
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Up,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    if selected_custom > 0 {
+                        match selected_custom {
+                            1 => {
+                                self.settings.custom_mode.start_level = self.settings.custom_mode.start_level.saturating_add(1);
+                            }
+                            2 => {
+                                self.settings.custom_mode.increment_level = !self.settings.custom_mode.increment_level;
+                            }
+                            3 => {
+                                match self.settings.custom_mode.limit {
+                                    Some(MeasureStat::Time(ref mut dur)) => {
+                                        *dur += Duration::from_secs(5);
+                                    }
+                                    Some(MeasureStat::Score(ref mut pts)) => {
+                                        *pts += 250;
+                                    }
+                                    Some(MeasureStat::Pieces(ref mut pcs)) => {
+                                        *pcs += 10;
+                                    }
+                                    Some(MeasureStat::Lines(ref mut lns)) => {
+                                        *lns += 5;
+                                    }
+                                    Some(MeasureStat::Level(ref mut lvl)) => {
+                                        *lvl = lvl.saturating_add(1);
+                                    }
+                                    None => { }
+                                };
+                            },
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        selected += selected_cnt - 1;
+                    }
+                }
+                // Move selector down or decrease stat.
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Down,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    // Selected custom stat; decrease it.
+                    if selected_custom > 0 {
+                        match selected_custom {
+                            1 => {
+                                self.settings.custom_mode.start_level = NonZeroU32::try_from(self.settings.custom_mode.start_level.get() - 1).unwrap_or(NonZeroU32::MIN);
+                            }
+                            2 => {
+                                self.settings.custom_mode.increment_level = !self.settings.custom_mode.increment_level;
+                            }
+                            3 => {
+                                match self.settings.custom_mode.limit {
+                                    Some(MeasureStat::Time(ref mut dur)) => {
+                                        *dur = dur.saturating_sub(Duration::from_secs(5));
+                                    }
+                                    Some(MeasureStat::Score(ref mut pts)) => {
+                                        *pts = pts.saturating_sub(250);
+                                    }
+                                    Some(MeasureStat::Pieces(ref mut pcs)) => {
+                                        *pcs = pcs.saturating_sub(10);
+                                    }
+                                    Some(MeasureStat::Lines(ref mut lns)) => {
+                                        *lns = lns.saturating_sub(5);
+                                    }
+                                    Some(MeasureStat::Level(ref mut lvl)) => {
+                                        *lvl = NonZeroU32::try_from(lvl.get() - 1).unwrap_or(NonZeroU32::MIN);
+                                    }
+                                    None => { }
+                                };
+                            },
+                            _ => unreachable!(),
+                        }
+                    // Move gamemode selector
+                    } else {
+                        selected += 1;
+                    }
+                }
+                // Move selector left (select stat).
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Left,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    if selected == selected_cnt - 1 && selected_custom > 0{
+                        selected_custom += selected_custom_cnt - 1
+                    }
+                }
+                // Move selector right (select stat).
+                Event::Key(KeyEvent {
+                    code: CT_Keycode::Right,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    // If custom gamemode selected, allow incrementing stat selection.
+                    if selected == selected_cnt - 1 {
+                        // If reached last stat, cycle through stats for limit.
+                        if selected_custom == selected_custom_cnt - 1 {
+                            self.settings.custom_mode.limit = match self.settings.custom_mode.limit {
+                                Some(MeasureStat::Time(_)) => Some(MeasureStat::Score(9000)),
+                                Some(MeasureStat::Score(_)) => Some(MeasureStat::Pieces(100)),
+                                Some(MeasureStat::Pieces(_)) => Some(MeasureStat::Lines(40)),
+                                Some(MeasureStat::Lines(_)) => Some(MeasureStat::Level(NonZeroU32::try_from(25).unwrap())),
+                                Some(MeasureStat::Level(_)) => None,
+                                None => Some(MeasureStat::Time(Duration::from_secs(120))),
+                            };
+                        } else {
+                            selected_custom += 1
+                        }
+                    }
+                }
+                // Other event: don't care.
+                _ => {}
+            }
+            selected = selected.rem_euclid(selected_cnt);
+            selected_custom = selected_custom.rem_euclid(selected_custom_cnt);
+        }
     }
 
     fn game(
@@ -491,9 +686,9 @@ impl<T: Write> TerminalTetrs<T> {
             [color="#007FFF"]
         */
         let selection = vec![
-            Menu::NewGame(self.settings.cache_custom_game.clone()),
+            Menu::NewGame,
             Menu::Scores,
-            Menu::Quit("quit after gameover".to_string()),
+            Menu::Quit("quit after game over".to_string()),
         ];
         self.generic_placeholder_widget("Game Over", selection)
     }
@@ -507,7 +702,7 @@ impl<T: Write> TerminalTetrs<T> {
             [color="#007FFF"]
         */
         let selection = vec![
-            Menu::NewGame(self.settings.cache_custom_game.clone()),
+            Menu::NewGame,
             Menu::Scores,
             Menu::Quit("quit after game complete".to_string()),
         ];
@@ -525,7 +720,7 @@ impl<T: Write> TerminalTetrs<T> {
         MenuUpdate::Pop
         */
         let selection = vec![
-            Menu::NewGame(self.settings.cache_custom_game.clone()),
+            Menu::NewGame,
             Menu::Scores,
             Menu::Options,
             Menu::About,

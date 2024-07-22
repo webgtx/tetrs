@@ -18,12 +18,13 @@ use tetrs_lib::{
 use crate::terminal_tetrs::TerminalTetrs;
 
 pub trait GameScreenRenderer {
-    fn render(
+    fn render<T>(
         &mut self,
-        ctx: &mut TerminalTetrs<impl Write>,
+        ctx: &mut TerminalTetrs<T>,
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
-    ) -> io::Result<()>;
+    ) -> io::Result<()>
+    where T: Write;
 }
 
 #[derive(Clone, Default, Debug)]
@@ -34,17 +35,18 @@ pub struct DebugRenderer {
 #[derive(Clone, Default, Debug)]
 pub struct UnicodeRenderer {
     events: Vec<(Instant, FeedbackEvent, bool)>,
-    accolades: BinaryHeap<(Instant, String)>,
+    messages: BinaryHeap<(Instant, String)>,
     hard_drop_tiles: Vec<(Instant, Coord, usize, TileTypeID, bool)>,
 }
 
 impl GameScreenRenderer for DebugRenderer {
-    fn render(
+    fn render<T>(
         &mut self,
-        ctx: &mut TerminalTetrs<impl Write>,
+        ctx: &mut TerminalTetrs<T>,
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
-    ) -> io::Result<()> {
+    ) -> io::Result<()> 
+    where T: Write {
         // Draw game stuf
         let GameState {
             last_updated,
@@ -114,7 +116,7 @@ impl GameScreenRenderer for DebugRenderer {
                     if *spin {
                         strs.push(format!("{shape:?}-Spin"));
                     }
-                    let accolade = match lineclears {
+                    let clear_action = match lineclears {
                         1 => "Single",
                         2 => "Double",
                         3 => "Triple",
@@ -128,7 +130,7 @@ impl GameScreenRenderer for DebugRenderer {
                         4 => "!!",
                         x => unreachable!("unexpected opportunity count {x}"),
                     };
-                    strs.push(format!("{accolade}{excl}"));
+                    strs.push(format!("{clear_action}{excl}"));
                     if *combo > 1 {
                         strs.push(format!("[{combo}.combo]"));
                     }
@@ -155,17 +157,14 @@ impl GameScreenRenderer for DebugRenderer {
 
 impl GameScreenRenderer for UnicodeRenderer {
     // NOTE: (note) what is the concept of having an ADT but some functions are only defined on some variants (that may contain record data)?
-    fn render(
+    fn render<T>(
         &mut self,
-        ctx: &mut TerminalTetrs<impl Write>,
+        ctx: &mut TerminalTetrs<T>,
         game: &mut Game,
         new_feedback_events: Vec<(Instant, FeedbackEvent)>,
-    ) -> io::Result<()> {
-        let (console_width, console_height) = terminal::size()?;
-        let (w_x, w_y) = (
-            console_width.saturating_sub(80) / 2,
-            console_height.saturating_sub(24) / 2,
-        );
+    ) -> io::Result<()>
+        where T: Write {
+        let (x_main, y_main) = TerminalTetrs::<T>::fetch_main_xy();
         let GameState {
             time_started,
             last_updated,
@@ -240,13 +239,13 @@ impl GameScreenRenderer for UnicodeRenderer {
             (
                 format!("{} left:", stat_name(stat)),
                 match stat {
-                    MeasureStat::Lines(lns) => format!("{}", lns - lines),
-                    MeasureStat::Level(lvl) => format!("{}", lvl.get() - level.get()),
-                    MeasureStat::Score(pts) => format!("{}", pts - score),
+                    MeasureStat::Lines(lns) => format!("{}", lns.saturating_sub(lines)),
+                    MeasureStat::Level(lvl) => format!("{}", lvl.get().saturating_sub(level.get())),
+                    MeasureStat::Score(pts) => format!("{}", pts.saturating_sub(*score)),
                     MeasureStat::Pieces(pcs) => {
-                        format!("{}", pcs - pieces_played.iter().sum::<u32>())
+                        format!("{}", pcs.saturating_sub(pieces_played.iter().sum::<u32>()))
                     }
-                    MeasureStat::Time(dur) => fmt_time(dur - time_elapsed),
+                    MeasureStat::Time(dur) => fmt_time(dur.saturating_sub(time_elapsed)),
                 },
             )
         } else {
@@ -340,13 +339,16 @@ impl GameScreenRenderer for UnicodeRenderer {
             format!("     Drop    {:<11     }╚════════════════════╝               ", key_icons_drop),
             format!("                                                             ", ),
         ];
+        let (x_board, y_board) = (25, 1);
+        let (x_preview, y_preview) = (49, 12);
+        let (x_messages, y_messages) = (48, 15);
         // Begin frame update.
         ctx.term
             .queue(terminal::BeginSynchronizedUpdate)?
             .queue(terminal::Clear(terminal::ClearType::All))?;
-        for (screen_y, str) in screen.iter().enumerate() {
+        for (y_screen, str) in screen.iter().enumerate() {
             ctx.term
-                .queue(cursor::MoveTo(w_x, w_y + u16::try_from(screen_y).unwrap()))?
+                .queue(cursor::MoveTo(x_main, y_main + u16::try_from(y_screen).unwrap()))?
                 .queue(Print(str))?;
         }
         // Board: helpers.
@@ -399,11 +401,10 @@ impl GameScreenRenderer for UnicodeRenderer {
             },
             t => unimplemented!("formatting unknown tile id {t}"),
         };
-        let (board_x, board_y) = (25, 1);
-        let move_to = |(x, y): Coord| {
+        let board_move_to = |(x, y): Coord| {
             MoveTo(
-                w_x + board_x + 2 * u16::try_from(x).unwrap(),
-                w_y + board_y + u16::try_from(Game::SKYLINE - y).unwrap(),
+                x_main + x_board + 2 * u16::try_from(x).unwrap(),
+                y_main + y_board + u16::try_from(Game::SKYLINE - y).unwrap(),
             )
         };
         // Board: draw hard drop trail.
@@ -425,7 +426,7 @@ impl GameScreenRenderer for UnicodeRenderer {
             // SAFETY: Valid ASCII bytes.
             let tile = String::from_utf8(vec![char, char]).unwrap();
             ctx.term
-                .queue(move_to(*pos))?
+                .queue(board_move_to(*pos))?
                 .queue(PrintStyledContent(tile.with(tile_color(*tile_type_id))))?;
         }
         self.hard_drop_tiles.retain(|elt| elt.4);
@@ -434,7 +435,7 @@ impl GameScreenRenderer for UnicodeRenderer {
             for (x, cell) in line.iter().enumerate() {
                 if let Some(tile_type_id) = cell {
                     ctx.term
-                        .queue(move_to((x, y)))?
+                        .queue(board_move_to((x, y)))?
                         .queue(PrintStyledContent("██".with(tile_color(*tile_type_id))))?;
                 }
             }
@@ -445,7 +446,7 @@ impl GameScreenRenderer for UnicodeRenderer {
             for (pos, tile_type_id) in active_piece.well_piece(board).tiles() {
                 if pos.1 <= Game::SKYLINE {
                     ctx.term
-                        .queue(move_to(pos))?
+                        .queue(board_move_to(pos))?
                         .queue(PrintStyledContent("░░".with(tile_color(tile_type_id))))?;
                 }
             }
@@ -453,7 +454,7 @@ impl GameScreenRenderer for UnicodeRenderer {
             for (pos, tile_type_id) in active_piece.tiles() {
                 if pos.1 <= Game::SKYLINE {
                     ctx.term
-                        .queue(move_to(pos))?
+                        .queue(board_move_to(pos))?
                         .queue(PrintStyledContent("▓▓".with(tile_color(tile_type_id))))?;
                 }
             }
@@ -461,7 +462,6 @@ impl GameScreenRenderer for UnicodeRenderer {
         // Draw preview.
         // TODO: Larger preview.
         if game.config().preview_count > 0 {
-            let (preview_x, preview_y) = (49, 12);
             // SAFETY: `preview_count > 0`.
             let next_piece = next_pieces.front().unwrap();
             let color = tile_color(next_piece.tiletypeid());
@@ -469,8 +469,8 @@ impl GameScreenRenderer for UnicodeRenderer {
                 // SAFETY: We will not exceed the bounds by drawing pieces.
                 ctx.term
                     .queue(MoveTo(
-                        w_x + preview_x + u16::try_from(2 * x).unwrap(),
-                        w_y + preview_y - u16::try_from(y).unwrap(),
+                        x_main + x_preview + u16::try_from(2 * x).unwrap(),
+                        y_main + y_preview - u16::try_from(y).unwrap(),
                     ))?
                     .queue(PrintStyledContent("▒▒".with(color)))?;
             }
@@ -503,7 +503,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                     for (pos, _tile_type_id) in piece.tiles() {
                         if pos.1 <= Game::SKYLINE {
                             ctx.term
-                                .queue(move_to(pos))?
+                                .queue(board_move_to(pos))?
                                 .queue(PrintStyledContent(tile.with(Color::White)))?;
                         }
                     }
@@ -533,11 +533,11 @@ impl GameScreenRenderer for UnicodeRenderer {
                         *relevant = false;
                         continue;
                     };
-                    for line_y in lines_cleared {
+                    for y_line in lines_cleared {
                         ctx.term
                             .queue(MoveTo(
-                                w_x + board_x,
-                                w_y + board_y + u16::try_from(Game::SKYLINE - *line_y).unwrap(),
+                                x_main + x_board,
+                                y_main + y_board + u16::try_from(Game::SKYLINE - *y_line).unwrap(),
                             ))?
                             .queue(PrintStyledContent(
                                 line_clear_frames[idx].with(Color::White),
@@ -545,12 +545,12 @@ impl GameScreenRenderer for UnicodeRenderer {
                     }
                 }
                 FeedbackEvent::HardDrop(_top_piece, bottom_piece) => {
-                    for ((x, y), tile_type_id) in bottom_piece.tiles() {
-                        for y2 in y..Game::SKYLINE {
+                    for ((x_tile, y_tile), tile_type_id) in bottom_piece.tiles() {
+                        for y in y_tile..Game::SKYLINE {
                             self.hard_drop_tiles.push((
                                 *event_time,
-                                (x, y2),
-                                y2 - y,
+                                (x_tile, y),
+                                y - y_tile,
                                 tile_type_id,
                                 true,
                             ));
@@ -575,7 +575,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                     if *spin {
                         strs.push(format!("{shape:?}-Spin"));
                     }
-                    let accolade = match lineclears {
+                    let clear_action = match lineclears {
                         1 => "Single",
                         2 => "Double",
                         3 => "Triple",
@@ -590,34 +590,31 @@ impl GameScreenRenderer for UnicodeRenderer {
                         4 => "!!",
                         x => unreachable!("unexpected opportunity count {x}"),
                     };
-                    strs.push(format!("{accolade}{excl}"));
+                    strs.push(format!("{clear_action}{excl}"));
                     if *combo > 1 {
                         strs.push(format!("[{combo}.combo]"));
                     }
-                    self.accolades.push((*event_time, strs.join(" ")));
+                    self.messages.push((*event_time, strs.join(" ")));
                     *relevant = false;
                 }
-                // TODO: Proper Debug?...
+                // TODO: Better Debug?
                 FeedbackEvent::Debug(msg) => {
-                    ctx.term.queue(MoveTo(w_x, w_y + 24))?.queue(Print(msg))?;
-                    if elapsed > Duration::from_secs(20) {
-                        *relevant = false;
-                    }
+                    self.messages.push((*event_time, msg.clone()));
+                    *relevant = false;
                 }
             }
         }
         self.events.retain(|elt| elt.2);
-        // Draw accolades.
-        let (accolade_x, accolade_y) = (48, 15);
-        for (dy, (_event_time, accolade)) in self.accolades.iter().enumerate() {
+        // Draw messages.
+        for (y, (_event_time, message)) in self.messages.iter().enumerate() {
             ctx.term
                 .queue(MoveTo(
-                    w_x + accolade_x,
-                    w_y + accolade_y + u16::try_from(dy).expect("too many accolades"),
+                    x_main + x_messages,
+                    y_main + y_messages + u16::try_from(y).expect("too many messages"),
                 ))?
-                .queue(Print(accolade))?;
+                .queue(Print(message))?;
         }
-        self.accolades.retain(|(event_time, _accolade)| {
+        self.messages.retain(|(event_time, _message)| {
             last_updated.saturating_duration_since(*event_time) < Duration::from_millis(6000)
         });
         // Execute draw.
