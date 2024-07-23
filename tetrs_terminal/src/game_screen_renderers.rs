@@ -445,6 +445,7 @@ impl GameScreenRenderer for UnicodeRenderer {
         );
         // Draw events.
         for (event_time, event, relevant) in self.visual_events.iter_mut().rev() {
+            let elapsed = game_time.saturating_sub(*event_time);
             match event {
                 FeedbackEvent::PieceLocked(piece) => {
                     // TODO: Polish locking animation?
@@ -457,7 +458,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                         (175, "▓▓"),
                     ]
                     .iter()
-                    .find_map(|(ms, tile)| (*event_time < Duration::from_millis(*ms)).then_some(tile)) else {
+                    .find_map(|(ms, tile)| (elapsed < Duration::from_millis(*ms)).then_some(tile)) else {
                         *relevant = false;
                         continue;
                     };
@@ -473,6 +474,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                     // TODO: Polish line clear animation?
                     if line_clear_delay.is_zero() {
                         *relevant = false;
+                        continue;
                     }
                     let line_clear_frames = [
                         "████████████████████",
@@ -486,7 +488,7 @@ impl GameScreenRenderer for UnicodeRenderer {
                         "        ████        ",
                         "         ██         ",
                     ];
-                    let percent = event_time.as_secs_f64() / line_clear_delay.as_secs_f64();
+                    let percent = elapsed.as_secs_f64() / line_clear_delay.as_secs_f64();
                     // SAFETY: `0.0 <= percent && percent <= 1.0`.
                     let idx = if percent < 1.0 {
                         unsafe { (10.0 * percent).to_int_unchecked::<usize>() }

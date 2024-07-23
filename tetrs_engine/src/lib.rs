@@ -20,7 +20,7 @@ pub type GameTime = Duration;
 type EventMap = HashMap<Event, GameTime>;
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Orientation {
     N,
     E,
@@ -29,7 +29,7 @@ pub enum Orientation {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Tetromino {
     O,
     I,
@@ -41,7 +41,7 @@ pub enum Tetromino {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActivePiece {
     pub shape: Tetromino,
     pub orientation: Orientation,
@@ -49,7 +49,7 @@ pub struct ActivePiece {
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stat {
     Lines(usize),
     Level(NonZeroU32),
@@ -59,7 +59,7 @@ pub enum Stat {
 }
 
 #[derive(Eq, Clone, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Gamemode {
     pub name: String,
     pub start_level: NonZeroU32,
@@ -69,7 +69,7 @@ pub struct Gamemode {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Button {
     MoveLeft,
     MoveRight,
@@ -81,7 +81,7 @@ pub enum Button {
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LockingData {
     touches_ground: bool,
     last_touchdown: Option<GameTime>,
@@ -91,7 +91,7 @@ pub struct LockingData {
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Event {
     LineClear,
     Spawn,
@@ -113,7 +113,7 @@ pub enum GameOver {
 }
 
 #[derive(Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameConfig {
     pub gamemode: Gamemode,
     pub preview_count: usize,
@@ -128,7 +128,7 @@ pub struct GameConfig {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameState {
     pub game_time: GameTime,
     pub finished: Option<Result<(), GameOver>>,
@@ -156,7 +156,7 @@ pub struct Game {
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug)]
-// TODO: serde #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FeedbackEvent {
     PieceLocked(ActivePiece),
     LineClears(Vec<usize>, Duration),

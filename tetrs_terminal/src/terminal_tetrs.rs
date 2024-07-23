@@ -23,7 +23,7 @@ pub type GameRunningStats = ([u32; 5], Vec<u32>);
 #[derive(Eq, PartialEq, Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct GameFinishedStats {
-    // TODO: save time: Instant,
+    timestamp: String,
     actions: [u32; 5],
     score_bonuses: Vec<u32>,
     gamemode: Gamemode,
@@ -95,8 +95,9 @@ pub struct App<T: Write> {
 
 impl<T: Write> Drop for App<T> {
     fn drop(&mut self) {
+        // TODO: All these errors? What do?
+        let _ = Self::save_games(&self.games_finished);
         // Console epilogue: de-initialization.
-        // TODO FIXME BUG: There's this horrible bug where the keyboard flags pop incorrectly: if I press escape in the pause menu, it resumes the game, but when I release escape during the game immediately after it interprets this as a "Press" as well, pausing again.
         if self.kitty_enabled {
             let _ = self.term.execute(event::PopKeyboardEnhancementFlags);
         }
@@ -669,17 +670,13 @@ impl<T: Write> App<T> {
             // Exit if game ended
             if let Some(good_end) = game.finished() {
                 let game_finished_stats = GameFinishedStats {
+                    timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string(),
                     actions: game_running_stats.0.clone(),
                     score_bonuses: game_running_stats.1.clone(),
                     gamemode: game.config().gamemode.clone(),
                     last_state: game.state().clone(),
                 };
                 self.games_finished.push(game_finished_stats);
-                // TODO: Correct error handling?
-                if let Err(e) = Self::save_games(&self.games_finished) {
-                    println!("{e}");
-                    std::thread::sleep(Duration::from_secs(10));
-                }
                 let menu = if good_end.is_ok() {
                     Menu::GameComplete
                 } else {
@@ -737,7 +734,7 @@ impl<T: Write> App<T> {
         success: bool,
     ) -> io::Result<MenuUpdate> {
         // SAFETY: We only call this function after at least one game has been finished.
-        let GameFinishedStats { actions, score_bonuses, gamemode, last_state } = self.games_finished.last().unwrap();
+        let GameFinishedStats { timestamp: _, actions, score_bonuses, gamemode, last_state } = self.games_finished.last().unwrap();
         let GameState {
             game_time,
             finished: _,
@@ -1218,10 +1215,11 @@ impl<T: Write> App<T> {
             let names = self.games_finished
                 .iter()
                 .skip(scroll)
-                .take(10)
-                .map(|GameFinishedStats { actions: _, score_bonuses: _, gamemode, last_state }| 
-                    format!("[{}] {}",
+                .take(16)
+                .map(|GameFinishedStats { timestamp, actions: _, score_bonuses: _, gamemode, last_state }| 
+                    format!("{} ({}): {}",
                     gamemode.name,
+                    timestamp,
                     match gamemode.optimize {
                         Stat::Lines(_) => last_state.lines_cleared.len().to_string(),
                         Stat::Level(_) => last_state.level.to_string(),
