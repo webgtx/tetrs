@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     io::{self, Write},
     num::NonZeroU32,
     sync::mpsc,
@@ -16,9 +17,9 @@ use crossterm::{
     style::{self, Print, PrintStyledContent, Stylize},
     terminal, ExecutableCommand, QueueableCommand,
 };
-use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, MeasureStat};
+use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, Stat};
 
-use crate::game_input_handler::{ButtonSignal, CT_Keycode, CrosstermHandler};
+use crate::game_input_handler::{ButtonSignal, CrosstermHandler};
 use crate::game_screen_renderers::{GameScreenRenderer, UnicodeRenderer};
 
 // NOTE: This could be more general and less ad-hoc. Count number of I-Spins, J-Spins, etc..
@@ -55,7 +56,7 @@ enum MenuUpdate {
 #[derive(PartialEq, Clone, Debug)]
 pub struct Settings {
     pub game_fps: f64,
-    pub keybinds: HashMap<CT_Keycode, Button>,
+    pub keybinds: HashMap<KeyCode, Button>,
     custom_mode: Gamemode,
     kitty_enabled: bool,
 }
@@ -117,23 +118,23 @@ impl<T: Write> App<T> {
             ));
         }
         // TODO: Store different keybind mappings somewhere and get default from there.
-        let ct_keybinds = HashMap::from([
-            (CT_Keycode::Left, Button::MoveLeft),
-            (CT_Keycode::Right, Button::MoveRight),
-            (CT_Keycode::Char('a'), Button::RotateLeft),
-            (CT_Keycode::Char('d'), Button::RotateRight),
-            (CT_Keycode::Down, Button::DropSoft),
-            (CT_Keycode::Up, Button::DropHard),
+        let keybinds = HashMap::from([
+            (KeyCode::Left, Button::MoveLeft),
+            (KeyCode::Right, Button::MoveRight),
+            (KeyCode::Char('a'), Button::RotateLeft),
+            (KeyCode::Char('d'), Button::RotateRight),
+            (KeyCode::Down, Button::DropSoft),
+            (KeyCode::Up, Button::DropHard),
         ]);
         let settings = Settings {
-            keybinds: ct_keybinds,
+            keybinds,
             game_fps: fps.into(),
             custom_mode: Gamemode::custom(
                 "Custom Mode".to_string(),
                 NonZeroU32::MIN,
                 true,
                 None,
-                MeasureStat::Time(Duration::ZERO),
+                Stat::Time(Duration::ZERO),
             ),
             kitty_enabled,
         };
@@ -145,41 +146,6 @@ impl<T: Write> App<T> {
 
     pub fn run(&mut self) -> io::Result<String> {
         let mut menu_stack = vec![Menu::Title];
-        // TODO: Remove this once menus are navigable.
-        // menu_stack.push(Menu::NewGame(Gamemode::custom(
-        //     "Unnamed Custom".to_string(),
-        //     NonZeroU32::MIN,
-        //     true,
-        //     Some(MeasureStat::Pieces(100)),
-        //     MeasureStat::Score(0),
-        // )));
-        // menu_stack.push(Menu::Game {
-        //     game: Box::new(Game::with_gamemode(
-        //         Gamemode::custom(
-        //             "Debug".to_string(),
-        //             NonZeroU32::try_from(10).unwrap(),
-        //             true,
-        //             None,
-        //             MeasureStat::Pieces(0),
-        //         ),
-        //         Instant::now(),
-        //     )),
-        //     game_screen_renderer: Default::default(),
-        //     total_duration_paused: Duration::ZERO,
-        //     last_paused: Instant::now(),
-        // });
-        // menu_stack.push(Menu::Game {
-        //     game: Box::new(Game::with_gamemode(Gamemode::marathon(), Instant::now())),
-        //     game_screen_renderer: Default::default(),
-        //     total_duration_paused: Duration::ZERO,
-        //     last_paused: Instant::now(),
-        // });
-        // menu_stack.push(Menu::Game {
-        //     game: Box::new(Game::with_gamemode(Gamemode::master(), Instant::now())),
-        //     game_screen_renderer: Default::default(),
-        //     total_duration_paused: Duration::ZERO,
-        //     last_paused: Instant::now(),
-        // });
         // Preparing main application loop.
         let msg = loop {
             // Retrieve active menu, stop application if stack is empty.
@@ -219,7 +185,9 @@ impl<T: Write> App<T> {
             // Change screen session depending on what response screen gave.
             match menu_update {
                 MenuUpdate::Pop => {
-                    if menu_stack.len() > 1 {
+                    if menu_stack.len() > 1
+                    /*TODO: Hmm. || matches!(menu_stack.first(), Some(Menu::Title))*/
+                    {
                         menu_stack.pop();
                     }
                 }
@@ -330,13 +298,13 @@ impl<T: Write> App<T> {
                     )))
                 }
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Esc,
+                    code: KeyCode::Esc,
                     kind: Press,
                     ..
                 }) => break Ok(MenuUpdate::Pop),
                 // Select next menu.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Enter,
+                    code: KeyCode::Enter,
                     kind: Press,
                     ..
                 }) => {
@@ -347,7 +315,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector up.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Up,
+                    code: KeyCode::Up,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -357,7 +325,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector down.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Down,
+                    code: KeyCode::Down,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -514,13 +482,13 @@ impl<T: Write> App<T> {
                 }
                 // Exit menu.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Esc,
+                    code: KeyCode::Esc,
                     kind: Press,
                     ..
                 }) => break Ok(MenuUpdate::Pop),
                 // Try select mode.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Enter,
+                    code: KeyCode::Enter,
                     kind: Press,
                     ..
                 }) => {
@@ -541,7 +509,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector up or increase stat.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Up,
+                    code: KeyCode::Up,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -560,19 +528,19 @@ impl<T: Write> App<T> {
                             }
                             3 => {
                                 match self.settings.custom_mode.limit {
-                                    Some(MeasureStat::Time(ref mut dur)) => {
+                                    Some(Stat::Time(ref mut dur)) => {
                                         *dur += d_time;
                                     }
-                                    Some(MeasureStat::Score(ref mut pts)) => {
+                                    Some(Stat::Score(ref mut pts)) => {
                                         *pts += d_score;
                                     }
-                                    Some(MeasureStat::Pieces(ref mut pcs)) => {
+                                    Some(Stat::Pieces(ref mut pcs)) => {
                                         *pcs += d_pieces;
                                     }
-                                    Some(MeasureStat::Lines(ref mut lns)) => {
+                                    Some(Stat::Lines(ref mut lns)) => {
                                         *lns += d_lines;
                                     }
-                                    Some(MeasureStat::Level(ref mut lvl)) => {
+                                    Some(Stat::Level(ref mut lvl)) => {
                                         *lvl = lvl.saturating_add(d_level);
                                     }
                                     None => {}
@@ -586,7 +554,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector down or decrease stat.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Down,
+                    code: KeyCode::Down,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -605,19 +573,19 @@ impl<T: Write> App<T> {
                             }
                             3 => {
                                 match self.settings.custom_mode.limit {
-                                    Some(MeasureStat::Time(ref mut dur)) => {
+                                    Some(Stat::Time(ref mut dur)) => {
                                         *dur = dur.saturating_sub(d_time);
                                     }
-                                    Some(MeasureStat::Score(ref mut pts)) => {
+                                    Some(Stat::Score(ref mut pts)) => {
                                         *pts = pts.saturating_sub(d_score);
                                     }
-                                    Some(MeasureStat::Pieces(ref mut pcs)) => {
+                                    Some(Stat::Pieces(ref mut pcs)) => {
                                         *pcs = pcs.saturating_sub(d_pieces);
                                     }
-                                    Some(MeasureStat::Lines(ref mut lns)) => {
+                                    Some(Stat::Lines(ref mut lns)) => {
                                         *lns = lns.saturating_sub(d_lines);
                                     }
-                                    Some(MeasureStat::Level(ref mut lvl)) => {
+                                    Some(Stat::Level(ref mut lvl)) => {
                                         *lvl = NonZeroU32::try_from(lvl.get() - d_level)
                                             .unwrap_or(NonZeroU32::MIN);
                                     }
@@ -633,7 +601,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector left (select stat).
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Left,
+                    code: KeyCode::Left,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -643,7 +611,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector right (select stat).
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Right,
+                    code: KeyCode::Right,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -653,14 +621,14 @@ impl<T: Write> App<T> {
                         if selected_custom == selected_custom_cnt - 1 {
                             self.settings.custom_mode.limit = match self.settings.custom_mode.limit
                             {
-                                Some(MeasureStat::Time(_)) => Some(MeasureStat::Score(9000)),
-                                Some(MeasureStat::Score(_)) => Some(MeasureStat::Pieces(100)),
-                                Some(MeasureStat::Pieces(_)) => Some(MeasureStat::Lines(40)),
-                                Some(MeasureStat::Lines(_)) => {
-                                    Some(MeasureStat::Level(NonZeroU32::try_from(25).unwrap()))
+                                Some(Stat::Time(_)) => Some(Stat::Score(9000)),
+                                Some(Stat::Score(_)) => Some(Stat::Pieces(100)),
+                                Some(Stat::Pieces(_)) => Some(Stat::Lines(40)),
+                                Some(Stat::Lines(_)) => {
+                                    Some(Stat::Level(NonZeroU32::try_from(25).unwrap()))
                                 }
-                                Some(MeasureStat::Level(_)) => None,
-                                None => Some(MeasureStat::Time(Duration::from_secs(120))),
+                                Some(Stat::Level(_)) => None,
+                                None => Some(Stat::Time(Duration::from_secs(120))),
                             };
                         } else {
                             selected_custom += 1
@@ -906,13 +874,13 @@ impl<T: Write> App<T> {
                     )))
                 }
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Esc,
+                    code: KeyCode::Esc,
                     kind: Press,
                     ..
                 }) => break Ok(MenuUpdate::Pop),
                 // Select next menu.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Enter,
+                    code: KeyCode::Enter,
                     kind: Press,
                     ..
                 }) => {
@@ -923,7 +891,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector up.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Up,
+                    code: KeyCode::Up,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -933,7 +901,7 @@ impl<T: Write> App<T> {
                 }
                 // Move selector down.
                 Event::Key(KeyEvent {
-                    code: CT_Keycode::Down,
+                    code: KeyCode::Down,
                     kind: Press | Repeat,
                     ..
                 }) => {
@@ -1028,7 +996,132 @@ impl<T: Write> App<T> {
 
         MenuUpdate::Pop
         */
-        self.generic_placeholder_widget("Configure Controls", vec![])
+        let action_selection = [
+            Button::MoveLeft,
+            Button::MoveRight,
+            Button::RotateLeft,
+            Button::RotateRight,
+            Button::RotateAround,
+            Button::DropSoft,
+            Button::DropHard,
+        ];
+        let mut selected = 0usize;
+        loop {
+            let w_main = Self::W_MAIN.into();
+            let (x_main, y_main) = Self::fetch_main_xy();
+            let y_selection = Self::H_MAIN / 5;
+            self.term
+                .queue(terminal::Clear(terminal::ClearType::All))?
+                .queue(MoveTo(x_main, y_main + y_selection))?
+                .queue(Print(format!("{:^w_main$}", "Configure Controls")))?
+                .queue(MoveTo(x_main, y_main + y_selection + 2))?
+                .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
+            let action_names = action_selection
+                .iter()
+                .map(|&button| {
+                    format!(
+                        "{button:?}: {}",
+                        format_keybinds(button, &self.settings.keybinds)
+                    )
+                })
+                .collect::<Vec<_>>();
+            let n_actions = action_names.len();
+            for (i, name) in action_names.into_iter().enumerate() {
+                self.term
+                    .queue(MoveTo(
+                        x_main,
+                        y_main + y_selection + 4 + u16::try_from(i).unwrap(),
+                    ))?
+                    .queue(Print(format!(
+                        "{:^w_main$}",
+                        if i == selected {
+                            format!(">>> {name} <<<")
+                        } else {
+                            name
+                        }
+                    )))?;
+            }
+            self.term
+                .queue(MoveTo(
+                    x_main,
+                    y_main + y_selection + 4 + u16::try_from(n_actions).unwrap() + 3,
+                ))?
+                .queue(PrintStyledContent(
+                    format!(
+                        "{:^w_main$}",
+                        "Press [Enter] to add a keybind to an action.",
+                    )
+                    .italic(),
+                ))?;
+            self.term.flush()?;
+            // Wait for new input.
+            match event::read()? {
+                // Quit menu.
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers: KeyModifiers::CONTROL,
+                    kind: Press | Repeat,
+                    state: _,
+                }) => {
+                    break Ok(MenuUpdate::Push(Menu::Quit(
+                        "exited with ctrl-c".to_string(),
+                    )))
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Esc,
+                    kind: Press,
+                    ..
+                }) => break Ok(MenuUpdate::Pop),
+                // Select button to modify.
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    kind: Press,
+                    ..
+                }) => {
+                    let current_button = action_selection[selected];
+                    self.term
+                        .queue(MoveTo(
+                            x_main,
+                            y_main + y_selection + 4 + u16::try_from(n_actions).unwrap() + 3,
+                        ))?
+                        .queue(PrintStyledContent(
+                            format!(
+                                "{:^w_main$}",
+                                format!("Press a key for {current_button:?}..."),
+                            )
+                            .italic(),
+                        ))?;
+                    loop {
+                        if let Event::Key(KeyEvent {
+                            code, kind: Press, ..
+                        }) = event::read()?
+                        {
+                            self.settings.keybinds.insert(code, current_button);
+                            break;
+                        }
+                    }
+                }
+                // Move selector up.
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    selected += action_selection.len() - 1;
+                }
+                // Move selector down.
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    kind: Press | Repeat,
+                    ..
+                }) => {
+                    selected += 1;
+                }
+                // Other event: don't care.
+                _ => {}
+            }
+            selected = selected.rem_euclid(action_selection.len());
+        }
     }
 
     fn scores(&mut self) -> io::Result<MenuUpdate> {
@@ -1055,4 +1148,36 @@ pub fn format_duration(dur: Duration) -> String {
         dur.as_secs() % 60,
         dur.as_millis() % 1000 / 10
     )
+}
+
+pub fn format_key(key: KeyCode) -> String {
+    format!(
+        "[{}]",
+        match key {
+            KeyCode::Backspace => "Back".to_string(),
+            KeyCode::Enter => "Enter".to_string(),
+            KeyCode::Left => "←".to_string(),
+            KeyCode::Right => "→".to_string(),
+            KeyCode::Up => "↑".to_string(),
+            KeyCode::Down => "↓".to_string(),
+            KeyCode::Home => "Home".to_string(),
+            KeyCode::End => "End".to_string(),
+            KeyCode::PageUp => "PgUp".to_string(),
+            KeyCode::PageDown => "PgDn".to_string(),
+            KeyCode::Tab => "Tab".to_string(),
+            KeyCode::Delete => "Del".to_string(),
+            KeyCode::F(n) => format!("F{n}"),
+            KeyCode::Char(c) => c.to_uppercase().to_string(),
+            KeyCode::Esc => "Esc".to_string(),
+            k => format!("{:?}", k),
+        }
+    )
+}
+
+pub fn format_keybinds(button: Button, keybinds: &HashMap<KeyCode, Button>) -> String {
+    keybinds
+        .iter()
+        .filter_map(|(&k, &b)| (b == button).then_some(format_key(k)))
+        .collect::<Vec<String>>()
+        .join(" ")
 }

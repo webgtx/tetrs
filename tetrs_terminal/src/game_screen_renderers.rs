@@ -12,11 +12,11 @@ use crossterm::{
     terminal, QueueableCommand,
 };
 use tetrs_engine::{
-    Button, Coord, FeedbackEvent, Game, GameConfig, GameState, MeasureStat, Orientation, Tetromino,
+    Button, Coord, FeedbackEvent, Game, GameConfig, GameState, Orientation, Stat, Tetromino,
     TileTypeID,
 };
 
-use crate::terminal_tetrs::{format_duration, ActionStats, App};
+use crate::terminal_tetrs::{format_duration, format_key, format_keybinds, ActionStats, App};
 
 pub trait GameScreenRenderer {
     fn render<T>(
@@ -196,107 +196,48 @@ impl GameScreenRenderer for UnicodeRenderer {
         let time_elapsed = last_updated.saturating_duration_since(*time_started);
         // Screen: some helpers.
         let stat_name = |stat| match stat {
-            MeasureStat::Lines(_) => "Lines",
-            MeasureStat::Level(_) => "Levels",
-            MeasureStat::Score(_) => "Score",
-            MeasureStat::Pieces(_) => "Pieces",
-            MeasureStat::Time(_) => "Time",
-        };
-        let fmt_key = |key: KeyCode| {
-            format!(
-                "[{}]",
-                match key {
-                    KeyCode::Backspace => "BACK".to_string(),
-                    KeyCode::Enter => "ENTR".to_string(),
-                    KeyCode::Left => "←".to_string(),
-                    KeyCode::Right => "→".to_string(),
-                    KeyCode::Up => "↑".to_string(),
-                    KeyCode::Down => "↓".to_string(),
-                    KeyCode::Home => "HOME".to_string(),
-                    KeyCode::End => "END".to_string(),
-                    KeyCode::PageUp => "PgUp".to_string(),
-                    KeyCode::PageDown => "PgDn".to_string(),
-                    KeyCode::Tab => "TAB".to_string(),
-                    KeyCode::Delete => "DEL".to_string(),
-                    KeyCode::F(n) => format!("F{n}"),
-                    KeyCode::Char(c) => c.to_uppercase().to_string(),
-                    KeyCode::Esc => "ESC".to_string(),
-                    _ => "??".to_string(),
-                }
-            )
+            Stat::Lines(_) => "Lines",
+            Stat::Level(_) => "Levels",
+            Stat::Score(_) => "Score",
+            Stat::Pieces(_) => "Pieces",
+            Stat::Time(_) => "Time",
         };
         // Screen: some titles.
         let mode_name = gamemode.name.to_ascii_uppercase();
         let mode_name_space = mode_name.len().max(14);
         let opti_name = stat_name(gamemode.optimize);
         let opti_value = match gamemode.optimize {
-            MeasureStat::Lines(_) => format!("{}", lines),
-            MeasureStat::Level(_) => format!("{}", level),
-            MeasureStat::Score(_) => format!("{}", score),
-            MeasureStat::Pieces(_) => format!("{}", pieces_played.iter().sum::<u32>()),
-            MeasureStat::Time(_) => format_duration(time_elapsed),
+            Stat::Lines(_) => format!("{}", lines),
+            Stat::Level(_) => format!("{}", level),
+            Stat::Score(_) => format!("{}", score),
+            Stat::Pieces(_) => format!("{}", pieces_played.iter().sum::<u32>()),
+            Stat::Time(_) => format_duration(time_elapsed),
         };
         let (goal_name, goal_value) = if let Some(stat) = gamemode.limit {
             (
                 format!("{} left:", stat_name(stat)),
                 match stat {
-                    MeasureStat::Lines(lns) => format!("{}", lns.saturating_sub(lines)),
-                    MeasureStat::Level(lvl) => format!("{}", lvl.get().saturating_sub(level.get())),
-                    MeasureStat::Score(pts) => format!("{}", pts.saturating_sub(*score)),
-                    MeasureStat::Pieces(pcs) => {
+                    Stat::Lines(lns) => format!("{}", lns.saturating_sub(lines)),
+                    Stat::Level(lvl) => format!("{}", lvl.get().saturating_sub(level.get())),
+                    Stat::Score(pts) => format!("{}", pts.saturating_sub(*score)),
+                    Stat::Pieces(pcs) => {
                         format!("{}", pcs.saturating_sub(pieces_played.iter().sum::<u32>()))
                     }
-                    MeasureStat::Time(dur) => format_duration(dur.saturating_sub(time_elapsed)),
+                    Stat::Time(dur) => format_duration(dur.saturating_sub(time_elapsed)),
                 },
             )
         } else {
             ("".to_string(), "".to_string())
         };
-        let key_icon_pause = fmt_key(KeyCode::Esc);
-        let key_icons_moveleft = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::MoveLeft).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
-        let key_icons_moveright = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::MoveRight).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
+        let key_icon_pause = format_key(KeyCode::Esc);
+        let key_icons_moveleft = format_keybinds(Button::MoveLeft, &app.settings.keybinds);
+        let key_icons_moveright = format_keybinds(Button::MoveRight, &app.settings.keybinds);
         let key_icons_move = format!("{key_icons_moveleft} {key_icons_moveright}");
-        let key_icons_rotateleft = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::RotateLeft).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
-        let key_icons_rotateright = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::RotateRight).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
+        let key_icons_rotateleft = format_keybinds(Button::RotateLeft, &app.settings.keybinds);
+        let key_icons_rotateright = format_keybinds(Button::RotateRight, &app.settings.keybinds);
         let key_icons_rotate = format!("{key_icons_rotateleft} {key_icons_rotateright}");
-        let key_icons_dropsoft = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::DropSoft).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
-        let key_icons_drophard = app
-            .settings
-            .keybinds
-            .iter()
-            .filter_map(|(&k, &b)| (b == Button::DropHard).then_some(fmt_key(k)))
-            .collect::<Vec<String>>()
-            .join(" ");
+        let key_icons_dropsoft = format_keybinds(Button::DropSoft, &app.settings.keybinds);
+        let key_icons_drophard = format_keybinds(Button::DropHard, &app.settings.keybinds);
         let key_icons_drop = format!("{key_icons_dropsoft} {key_icons_drophard}");
         let piececnts_o = format!("{}o", pieces_played[Tetromino::O]);
         let piececnts_i_s_z = [

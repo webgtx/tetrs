@@ -45,7 +45,7 @@ pub struct ActivePiece {
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
-pub enum MeasureStat {
+pub enum Stat {
     Lines(usize),
     Level(NonZeroU32),
     Score(u32),
@@ -58,8 +58,8 @@ pub struct Gamemode {
     pub name: String,
     pub start_level: NonZeroU32,
     pub increment_level: bool,
-    pub limit: Option<MeasureStat>,
-    pub optimize: MeasureStat,
+    pub limit: Option<Stat>,
+    pub optimize: Stat,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
@@ -349,8 +349,8 @@ impl Gamemode {
         name: String,
         start_level: NonZeroU32,
         increment_level: bool,
-        mode_limit: Option<MeasureStat>,
-        optimization_goal: MeasureStat,
+        mode_limit: Option<Stat>,
+        optimization_goal: Stat,
     ) -> Self {
         Self {
             name,
@@ -367,8 +367,8 @@ impl Gamemode {
             name: String::from("Marathon"),
             start_level: NonZeroU32::MIN,
             increment_level: true,
-            limit: Some(MeasureStat::Level(Game::LEVEL_20G.saturating_add(1))),
-            optimize: MeasureStat::Score(0),
+            limit: Some(Stat::Level(Game::LEVEL_20G.saturating_add(1))),
+            optimize: Stat::Score(0),
         }
     }
 
@@ -378,8 +378,8 @@ impl Gamemode {
             name: String::from("Sprint"),
             start_level,
             increment_level: false,
-            limit: Some(MeasureStat::Lines(40)),
-            optimize: MeasureStat::Time(Duration::ZERO),
+            limit: Some(Stat::Lines(40)),
+            optimize: Stat::Time(Duration::ZERO),
         }
     }
 
@@ -389,8 +389,8 @@ impl Gamemode {
             name: String::from("Ultra"),
             start_level,
             increment_level: false,
-            limit: Some(MeasureStat::Time(Duration::from_secs(3 * 60))),
-            optimize: MeasureStat::Lines(0),
+            limit: Some(Stat::Time(Duration::from_secs(3 * 60))),
+            optimize: Stat::Lines(0),
         }
     }
 
@@ -400,8 +400,8 @@ impl Gamemode {
             name: String::from("Master"),
             start_level: Game::LEVEL_20G,
             increment_level: true,
-            limit: Some(MeasureStat::Lines(300)),
-            optimize: MeasureStat::Score(0),
+            limit: Some(Stat::Lines(300)),
+            optimize: Stat::Score(0),
         }
     }
 
@@ -412,7 +412,7 @@ impl Gamemode {
             start_level: NonZeroU32::MIN,
             increment_level: true,
             limit: None,
-            optimize: MeasureStat::Pieces(0),
+            optimize: Stat::Pieces(0),
         }
     }
 }
@@ -587,15 +587,13 @@ impl Game {
                         // Check if game has to end.
                         if let Some(limit) = self.config.gamemode.limit {
                             let goal_achieved = match limit {
-                                MeasureStat::Lines(lines) => {
-                                    lines <= self.state.lines_cleared.len()
-                                }
-                                MeasureStat::Level(level) => level <= self.state.level,
-                                MeasureStat::Score(score) => score <= self.state.score,
-                                MeasureStat::Pieces(pieces) => {
+                                Stat::Lines(lines) => lines <= self.state.lines_cleared.len(),
+                                Stat::Level(level) => level <= self.state.level,
+                                Stat::Score(score) => score <= self.state.score,
+                                Stat::Pieces(pieces) => {
                                     pieces <= self.state.pieces_played.iter().sum()
                                 }
-                                MeasureStat::Time(timer) => {
+                                Stat::Time(timer) => {
                                     timer <= self.state.last_updated - self.state.time_started
                                 }
                             };

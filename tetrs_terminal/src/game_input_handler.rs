@@ -9,8 +9,7 @@ use std::{
     time::Instant,
 };
 
-pub use crossterm::event::KeyCode as CT_Keycode;
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 use tetrs_engine::Button;
 
@@ -32,7 +31,7 @@ impl Drop for CrosstermHandler {
 impl CrosstermHandler {
     pub fn new(
         sender: &Sender<ButtonSignal>,
-        keybinds: &HashMap<CT_Keycode, Button>,
+        keybinds: &HashMap<KeyCode, Button>,
         kitty_enabled: bool,
     ) -> Self {
         let spawn = if kitty_enabled {
@@ -50,7 +49,7 @@ impl CrosstermHandler {
     fn spawn_standard(
         sender: Sender<ButtonSignal>,
         flag: Arc<AtomicBool>,
-        keybinds: HashMap<CT_Keycode, Button>,
+        keybinds: HashMap<KeyCode, Button>,
     ) -> JoinHandle<()> {
         thread::spawn(move || {
             loop {
@@ -68,7 +67,7 @@ impl CrosstermHandler {
                 let button_signals = match event {
                     // Escape pressed: send interrupt.
                     Event::Key(KeyEvent {
-                        code: CT_Keycode::Esc,
+                        code: KeyCode::Esc,
                         kind: KeyEventKind::Press,
                         ..
                     }) => vec![None],
@@ -101,7 +100,7 @@ impl CrosstermHandler {
     fn spawn_kitty(
         sender: Sender<ButtonSignal>,
         flag: Arc<AtomicBool>,
-        keybinds: HashMap<CT_Keycode, Button>,
+        keybinds: HashMap<KeyCode, Button>,
     ) -> JoinHandle<()> {
         thread::spawn(move || {
             loop {
@@ -121,7 +120,7 @@ impl CrosstermHandler {
                 let button_signal = match event {
                     // Escape pressed: send pause/interrupt.
                     Event::Key(KeyEvent {
-                        code: CT_Keycode::Esc,
+                        code: KeyCode::Esc,
                         kind: KeyEventKind::Press,
                         ..
                     }) => None,
@@ -156,7 +155,7 @@ pub trait GameInputHandler {
 }
 
 impl GameInputHandler for CrosstermHandler {
-    type KeycodeType = CT_Keycode;
+    type KeycodeType = KeyCode;
 }
 
 
