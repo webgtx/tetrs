@@ -145,7 +145,7 @@ impl<T: Write> App<T> {
             NonZeroU32::MIN,
             true,
             None,
-            Stat::Time(Duration::ZERO),
+            Stat::Lines(0),
         );
         let games_finished = Self::load_games().unwrap_or(Vec::new());
         Self {
@@ -677,6 +677,7 @@ impl<T: Write> App<T> {
                     last_state: game.state().clone(),
                 };
                 self.games_finished.push(game_finished_stats);
+                self.games_finished.sort_by_cached_key(|game_finished_stats| game_finished_stats.gamemode.name.clone());
                 let menu = if good_end.is_ok() {
                     Menu::GameComplete
                 } else {
@@ -1218,16 +1219,30 @@ impl<T: Write> App<T> {
                 .skip(scroll)
                 .take(max_entries)
                 .map(|GameFinishedStats { timestamp, actions: _, score_bonuses: _, gamemode, last_state }| 
-                    format!("{} ({}): {}",
+                    format!("{}: {} ({} limit{}) @{}",
                     gamemode.name,
-                    timestamp,
                     match gamemode.optimize {
-                        Stat::Lines(_) => format!("{} lines", last_state.lines_cleared.len()),
-                        Stat::Level(_) => format!("{} levels", last_state.level),
-                        Stat::Score(_) => format!("{} points", last_state.score),
+                        Stat::Lines(_) =>  format!("{} lines", last_state.lines_cleared.len()),
+                        Stat::Level(_) =>  format!("{} levels", last_state.level),
+                        Stat::Score(_) =>  format!("{} points", last_state.score),
                         Stat::Pieces(_) => format!("{} pieces", last_state.pieces_played.iter().sum::<u32>()),
-                        Stat::Time(_) => format!("{} long", format_duration(last_state.game_time)),
-                    }
+                        Stat::Time(_) =>  format_duration(last_state.game_time),
+                    },
+                    match gamemode.limit {
+                        None => "no".to_string(),
+                        Some(Stat::Lines(lns)) => format!("{lns} line"),
+                        Some(Stat::Level(lvl)) => format!("{lvl} level"),
+                        Some(Stat::Score(pts)) => format!("{pts} points"),
+                        Some(Stat::Pieces(pcs)) => format!("{pcs} piece"),
+                        Some(Stat::Time(dur)) => format_duration(dur),
+                    },
+                    // SAFETY: Unfinished games cannot be passed up to this point.
+                    if last_state.finished.unwrap().is_err() {
+                        " *not fin."
+                    } else {
+                        ""
+                    },
+                    timestamp,
                 ))
                 .collect::<Vec<_>>();
             let n_entries = entries.len();
@@ -1238,7 +1253,7 @@ impl<T: Write> App<T> {
                         y_main + y_selection + 4 + u16::try_from(i).unwrap(),
                     ))?
                     .queue(Print(format!(
-                        "{:^w_main$}",
+                        "{:<w_main$}",
                         entry
                     )))?;
             }
@@ -1310,7 +1325,7 @@ impl<T: Write> App<T> {
 
 pub fn format_duration(dur: Duration) -> String {
     format!(
-        "{}:{:02}.{:02}",
+        "{}min {}.{:02}sec",
         dur.as_secs() / 60,
         dur.as_secs() % 60,
         dur.as_millis() % 1000 / 10
