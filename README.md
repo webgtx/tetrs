@@ -38,7 +38,7 @@ let GameState { board, .. } = game.state();
 ```
 
 
-# Features of the Frontend / Terminal Application
+# Features of the Terminal Application
 
 TODO: GIFs and screenshots.
 
@@ -88,6 +88,7 @@ On the Rust side of things I learned about
 - the handy drop-in [`BufWriter`](https://doc.rust-lang.org/std/io/struct.BufWriter.html) wrapper to diminish flickering,
 - [clap](https://docs.rs/clap/latest/clap/) to parse simple command line arguments,
 - more practice with Rust's [module system](https://doc.rust-lang.org/book/ch07-00-managing-growing-projects-with-packages-crates-and-modules.html),
+- multithreading with [`std::sync::mpsc`](https://doc.rust-lang.org/std/sync/mpsc/)
 - [cargo workspaces](https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html) to fully separate frontend and backend,
 - [cargo git dependencies](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-dependencies-from-git-repositories) so other people *could* reuse the backend,
 - and finally [cross-compilation](https://blog.logrocket.com/guide-cross-compilation-rust/#how-rust-represents-platforms) for releases.
