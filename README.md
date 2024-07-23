@@ -58,12 +58,13 @@ Currently implemented features and considerations are:
     - Level, Score, Lines, Time, Pieces generated
   - For technical details see [Features of the Tetrs Engine](#features-of-the-tetrs-engine).
 
-Game controls are not customizable at the time and default to the following:
+Game controls are customizable and default to the following:
 | Key | Action |
 | -: | :-: |
 | `Esc` | Pause game |
 | `A` | Rotate left |
 | `D` | Rotate right |
+| - | Rotate 180 |
 | `←` | Move left |
 | `→` | Move right |
 | `↓` | Soft drop |
