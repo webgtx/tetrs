@@ -1,12 +1,13 @@
 use std::{
-    collections::{BinaryHeap, VecDeque},
+    cmp::Ordering,
+    collections::BinaryHeap,
     fmt::Debug,
     io::{self, Write},
     time::Duration,
 };
 
 use crossterm::{
-    cursor::{self, MoveToNextLine},
+    cursor,
     event::KeyCode,
     style::{self, Color, Print, Stylize},
     terminal, QueueableCommand,
@@ -16,23 +17,13 @@ use tetrs_engine::{
     Tetromino, TileTypeID,
 };
 
-use crate::terminal_tetrs::{format_duration, format_key, format_keybinds, App, GameRunningStats};
-
-pub trait GameScreenRenderer {
-    fn render<T>(
-        &mut self,
-        app: &mut App<T>,
-        game: &mut Game,
-        action_stats: &mut GameRunningStats,
-        new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
-        screen_resized: bool,
-    ) -> io::Result<()>
-    where
-        T: Write;
-}
+use crate::{
+    game_renderers::GameScreenRenderer,
+    terminal_tetrs::{format_duration, format_key, format_keybinds, App, GameRunningStats},
+};
 
 #[derive(Clone, Default, Debug)]
-struct UnicodeScreenBuf {
+struct ScreenBuf {
     prev: Vec<Vec<(char, Option<Color>)>>,
     next: Vec<Vec<(char, Option<Color>)>>,
     x_draw: usize,
@@ -40,19 +31,14 @@ struct UnicodeScreenBuf {
 }
 
 #[derive(Clone, Default, Debug)]
-pub struct UnicodeRenderer {
-    screen: UnicodeScreenBuf,
+pub struct Renderer {
+    screen: ScreenBuf,
     visual_events: Vec<(GameTime, FeedbackEvent, bool)>,
     messages: BinaryHeap<(GameTime, String)>,
     hard_drop_tiles: Vec<(GameTime, Coord, usize, TileTypeID, bool)>,
 }
 
-#[derive(Clone, Default, Debug)]
-pub struct NaiveRenderer {
-    feedback_event_buffer: VecDeque<(GameTime, FeedbackEvent)>,
-}
-
-impl UnicodeScreenBuf {
+impl ScreenBuf {
     fn buf_from_strs(&mut self, base_screen: Vec<String>) {
         self.next = base_screen
             .iter()
@@ -100,6 +86,36 @@ impl UnicodeScreenBuf {
                         self.put(term, next_cell, x, y)?;
                     }
                 }
+                match prev_line.len().cmp(&next_line.len()) {
+                    Ordering::Less => {
+                        for (x, next_cell) in next_line.iter().skip(prev_line.len()).enumerate() {
+                            self.put(term, next_cell, x, y)?;
+                        }
+                    }
+                    Ordering::Equal => {}
+                    Ordering::Greater => {
+                        for x in next_line.len()..prev_line.len() {
+                            self.put(term, &(' ', None), x, y)?;
+                        }
+                    }
+                }
+            }
+            match self.prev.len().cmp(&self.next.len()) {
+                Ordering::Less => {
+                    for (y, next_line) in self.next.iter().skip(self.prev.len()).enumerate() {
+                        for (x, next_cell) in next_line.iter().enumerate() {
+                            self.put(term, next_cell, x, y)?;
+                        }
+                    }
+                }
+                Ordering::Equal => {}
+                Ordering::Greater => {
+                    for (y, prev_line) in self.prev.iter().skip(self.next.len()).enumerate() {
+                        for (x, _) in prev_line.iter().enumerate() {
+                            self.put(term, &(' ', None), x, y)?;
+                        }
+                    }
+                }
             }
         }
         // End frame update and flush.
@@ -132,7 +148,7 @@ impl UnicodeScreenBuf {
     }
 }
 
-impl GameScreenRenderer for UnicodeRenderer {
+impl GameScreenRenderer for Renderer {
     // NOTE self: what is the concept of having an ADT but some functions are only defined on some variants (that may contain record data)?
     fn render<T>(
         &mut self,
@@ -511,122 +527,5 @@ impl GameScreenRenderer for UnicodeRenderer {
             game_time.saturating_sub(*event_time) < Duration::from_millis(6000)
         });
         self.screen.flush(&mut app.term)
-    }
-}
-
-impl GameScreenRenderer for NaiveRenderer {
-    fn render<T>(
-        &mut self,
-        app: &mut App<T>,
-        game: &mut Game,
-        _action_stats: &mut GameRunningStats,
-        new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
-        _screen_resized: bool,
-    ) -> io::Result<()>
-    where
-        T: Write,
-    {
-        // Draw game stuf
-        let GameState {
-            game_time,
-            board,
-            active_piece_data,
-            ..
-        } = game.state();
-        let mut temp_board = board.clone();
-        if let Some((active_piece, _)) = active_piece_data {
-            for ((x, y), tile_type_id) in active_piece.tiles() {
-                temp_board[y][x] = Some(tile_type_id);
-            }
-        }
-        app.term
-            .queue(cursor::MoveTo(0, 0))?
-            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?;
-        app.term
-            .queue(Print("   +--------------------+"))?
-            .queue(MoveToNextLine(1))?;
-        for (idx, line) in temp_board.iter().take(20).enumerate().rev() {
-            let txt_line = format!(
-                "{idx:02} |{}|",
-                line.iter()
-                    .map(|cell| {
-                        cell.map_or(" .", |tile| match tile.get() {
-                            1 => "OO",
-                            2 => "II",
-                            3 => "SS",
-                            4 => "ZZ",
-                            5 => "TT",
-                            6 => "LL",
-                            7 => "JJ",
-                            t => unimplemented!("formatting unknown tile id {t}"),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .join("")
-            );
-            app.term.queue(Print(txt_line))?.queue(MoveToNextLine(1))?;
-        }
-        app.term
-            .queue(Print("   +--------------------+"))?
-            .queue(MoveToNextLine(1))?;
-        app.term
-            .queue(style::Print(format!("   {:?}", game_time)))?
-            .queue(MoveToNextLine(1))?;
-        // Draw feedback stuf
-        for evt in new_feedback_events {
-            self.feedback_event_buffer.push_front(evt);
-        }
-        let mut feed_evt_msgs = Vec::new();
-        for (_, feedback_event) in self.feedback_event_buffer.iter() {
-            feed_evt_msgs.push(match feedback_event {
-                FeedbackEvent::Accolade {
-                    score_bonus,
-                    shape,
-                    spin,
-                    lineclears,
-                    perfect_clear,
-                    combo,
-                    opportunity,
-                } => {
-                    let mut strs = Vec::new();
-                    if *spin {
-                        strs.push(format!("{shape:?}-Spin"));
-                    }
-                    let clear_action = match lineclears {
-                        1 => "Single",
-                        2 => "Double",
-                        3 => "Triple",
-                        4 => "Quadruple",
-                        x => unreachable!("unexpected line clear count {x}"),
-                    };
-                    let excl = match opportunity {
-                        1 => "'",
-                        2 => "!",
-                        3 => "!'",
-                        4 => "!!",
-                        x => unreachable!("unexpected opportunity count {x}"),
-                    };
-                    strs.push(format!("{clear_action}{excl}"));
-                    if *combo > 1 {
-                        strs.push(format!("[{combo}.combo]"));
-                    }
-                    if *perfect_clear {
-                        strs.push("PERFECT!".to_string());
-                    }
-                    strs.push(format!("+{score_bonus}"));
-                    strs.join(" ")
-                }
-                FeedbackEvent::PieceLocked(_) => continue,
-                FeedbackEvent::LineClears(..) => continue,
-                FeedbackEvent::HardDrop(_, _) => continue,
-                FeedbackEvent::Debug(s) => s.clone(),
-            });
-        }
-        for str in feed_evt_msgs.iter().take(16) {
-            app.term.queue(Print(str))?.queue(MoveToNextLine(1))?;
-        }
-        // Execute draw.
-        app.term.flush()?;
-        Ok(())
     }
 }

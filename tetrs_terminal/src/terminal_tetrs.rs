@@ -21,7 +21,7 @@ use crossterm::{
 use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, RotationSystem, Stat};
 
 use crate::game_input_handler::{ButtonSignal, CrosstermHandler, Sig};
-use crate::game_renderers::{GameScreenRenderer, UnicodeRenderer};
+use crate::game_renderers::{cached::Renderer, GameScreenRenderer};
 
 // NOTE: This could be more general and less ad-hoc. Count number of I-Spins, J-Spins, etc..
 pub type GameRunningStats = ([u32; 5], Vec<u32>);
@@ -51,7 +51,7 @@ enum Menu {
         last_paused: Instant,
         total_duration_paused: Duration,
         game_running_stats: GameRunningStats,
-        game_renderer: Box<UnicodeRenderer>,
+        game_renderer: Box<Renderer>,
     },
     GameOver(Box<GameFinishedStats>),
     GameComplete(Box<GameFinishedStats>),
@@ -92,6 +92,7 @@ enum MenuUpdate {
 pub struct Settings {
     pub keybinds: HashMap<KeyCode, Button>,
     pub game_fps: f64,
+    pub show_fps: bool,
     pub rotation_system: RotationSystem,
 }
 
@@ -149,6 +150,7 @@ impl<T: Write> App<T> {
         let settings = Settings {
             keybinds,
             game_fps: fps.into(),
+            show_fps: false,
             rotation_system: RotationSystem::Ocular,
         };
         let custom_mode = Gamemode::custom(
@@ -686,6 +688,8 @@ impl<T: Write> App<T> {
         *total_duration_paused += session_resumed.saturating_duration_since(*last_paused);
         let mut clean_screen = true;
         let mut f = 0u32;
+        let mut fps_counter = 0;
+        let mut fps_counter_started = Instant::now();
         let menu_update = 'render_loop: loop {
             // Exit if game ended
             if game.is_finished() {
@@ -699,8 +703,16 @@ impl<T: Write> App<T> {
             }
             // Start next frame
             f += 1;
-            let next_frame_at =
-                session_resumed + Duration::from_secs_f64(f64::from(f) / self.settings.game_fps);
+            fps_counter += 1;
+            let next_frame_at = loop {
+                let frame_at = session_resumed
+                    + Duration::from_secs_f64(f64::from(f) / self.settings.game_fps);
+                if frame_at < Instant::now() {
+                    f += 1;
+                } else {
+                    break frame_at;
+                }
+            };
             let mut new_feedback_events = Vec::new();
             'idle_loop: loop {
                 let frame_idle_remaining = next_frame_at - Instant::now();
@@ -758,6 +770,17 @@ impl<T: Write> App<T> {
                 clean_screen,
             )?;
             clean_screen = false;
+            // FPS counter.
+            if self.settings.show_fps {
+                let now = Instant::now();
+                if now.saturating_duration_since(fps_counter_started) >= Duration::from_secs(1) {
+                    self.term
+                        .execute(MoveTo(0, 0))?
+                        .execute(Print(format!("{:_>6}", format!("{fps_counter}fps"))))?;
+                    fps_counter = 0;
+                    fps_counter_started = now;
+                }
+            }
         };
         Ok(menu_update)
     }
@@ -1002,8 +1025,8 @@ impl<T: Write> App<T> {
     fn gameover(&mut self, game_finished_stats: &GameFinishedStats) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
-            Menu::Scores,
             Menu::Settings,
+            Menu::Scores,
             Menu::Quit("quit after game over".to_string()),
         ];
         self.generic_game_finished(selection, false, game_finished_stats)
@@ -1012,8 +1035,8 @@ impl<T: Write> App<T> {
     fn gamecomplete(&mut self, game_finished_stats: &GameFinishedStats) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
-            Menu::Scores,
             Menu::Settings,
+            Menu::Scores,
             Menu::Quit("quit after game complete".to_string()),
         ];
         self.generic_game_finished(selection, true, game_finished_stats)
@@ -1031,7 +1054,7 @@ impl<T: Write> App<T> {
     }
 
     fn settings(&mut self) -> io::Result<MenuUpdate> {
-        let selection_len = 3;
+        let selection_len = 4;
         let mut selected = 0usize;
         loop {
             let w_main = Self::W_MAIN.into();
@@ -1062,9 +1085,9 @@ impl<T: Write> App<T> {
                 .queue(Print(format!(
                     "{:^w_main$}",
                     if selected == 1 {
-                        format!(">>> FPS: {} <<<", self.settings.game_fps)
+                        format!(">>> Framerate: {} <<<", self.settings.game_fps)
                     } else {
-                        format!("FPS: {}", self.settings.game_fps)
+                        format!("Framerate: {}", self.settings.game_fps)
                     }
                 )))?
                 .queue(MoveTo(
@@ -1074,6 +1097,18 @@ impl<T: Write> App<T> {
                 .queue(Print(format!(
                     "{:^w_main$}",
                     if selected == 2 {
+                        format!(">>> Show FPS counter: {} <<<", self.settings.show_fps)
+                    } else {
+                        format!("Show FPS counter: {}", self.settings.show_fps)
+                    }
+                )))?
+                .queue(MoveTo(
+                    x_main,
+                    y_main + y_selection + 4 + u16::try_from(3).unwrap(),
+                ))?
+                .queue(Print(format!(
+                    "{:^w_main$}",
+                    if selected == 3 {
                         format!(
                             ">>> Rotation System: '{:?}' <<<",
                             self.settings.rotation_system
@@ -1142,6 +1177,8 @@ impl<T: Write> App<T> {
                     if selected == 1 {
                         self.settings.game_fps += 1.0;
                     } else if selected == 2 {
+                        self.settings.show_fps = !self.settings.show_fps;
+                    } else if selected == 3 {
                         self.settings.rotation_system = match self.settings.rotation_system {
                             RotationSystem::Ocular => RotationSystem::Classic,
                             RotationSystem::Classic => RotationSystem::Super,
@@ -1157,6 +1194,8 @@ impl<T: Write> App<T> {
                     if selected == 1 && self.settings.game_fps > 0.0 {
                         self.settings.game_fps -= 1.0;
                     } else if selected == 2 {
+                        self.settings.show_fps = !self.settings.show_fps;
+                    } else if selected == 3 {
                         self.settings.rotation_system = match self.settings.rotation_system {
                             RotationSystem::Ocular => RotationSystem::Super,
                             RotationSystem::Classic => RotationSystem::Ocular,
@@ -1310,7 +1349,7 @@ impl<T: Write> App<T> {
             self.term
                 .queue(terminal::Clear(terminal::ClearType::All))?
                 .queue(MoveTo(x_main, y_main + y_selection))?
-                .queue(Print(format!("{:^w_main$}", "* Highscores *")))?
+                .queue(Print(format!("{:^w_main$}", "* Scoreboard *")))?
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
             let entries = self
