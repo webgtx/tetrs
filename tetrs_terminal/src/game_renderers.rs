@@ -25,6 +25,7 @@ pub trait GameScreenRenderer {
         game: &mut Game,
         action_stats: &mut GameRunningStats,
         new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        clean_screen: bool,
     ) -> io::Result<()>
     where
         T: Write;
@@ -49,6 +50,7 @@ impl GameScreenRenderer for DebugRenderer {
         game: &mut Game,
         _action_stats: &mut GameRunningStats,
         new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        _clean_screen: bool,
     ) -> io::Result<()>
     where
         T: Write,
@@ -166,6 +168,7 @@ impl GameScreenRenderer for UnicodeRenderer {
         game: &mut Game,
         action_stats: &mut GameRunningStats,
         new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        clean_screen: bool,
     ) -> io::Result<()>
     where
         T: Write,
@@ -299,9 +302,10 @@ impl GameScreenRenderer for UnicodeRenderer {
         let (x_preview, y_preview) = (49, 12);
         let (x_messages, y_messages) = (48, 15);
         // Begin frame update.
-        app.term
-            .queue(terminal::BeginSynchronizedUpdate)?
-            .queue(terminal::Clear(terminal::ClearType::All))?;
+        app.term.queue(terminal::BeginSynchronizedUpdate)?;
+        if clean_screen {
+            app.term.queue(terminal::Clear(terminal::ClearType::All))?;
+        }
         for (y_screen, str) in screen.iter().enumerate() {
             app.term
                 .queue(cursor::MoveTo(

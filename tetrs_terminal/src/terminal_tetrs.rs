@@ -20,20 +20,25 @@ use crossterm::{
 };
 use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, Stat};
 
-use crate::game_input_handler::{ButtonSignal, CrosstermHandler};
+use crate::game_input_handler::{ButtonSignal, CrosstermHandler, Sig};
 use crate::game_renderers::{GameScreenRenderer, UnicodeRenderer};
 
 // NOTE: This could be more general and less ad-hoc. Count number of I-Spins, J-Spins, etc..
 pub type GameRunningStats = ([u32; 5], Vec<u32>);
 
-#[derive(Eq, PartialEq, Clone, Debug)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameFinishedStats {
     timestamp: String,
     actions: [u32; 5],
     score_bonuses: Vec<u32>,
     gamemode: Gamemode,
     last_state: GameState,
+}
+
+impl GameFinishedStats {
+    fn was_successful(&self) -> bool {
+        self.last_state.finished.is_some_and(|fin| fin.is_ok())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -48,10 +53,10 @@ enum Menu {
         game_running_stats: GameRunningStats,
         game_renderer: UnicodeRenderer,
     },
-    GameOver,
-    GameComplete,
+    GameOver(Box<GameFinishedStats>),
+    GameComplete(Box<GameFinishedStats>),
     Pause,
-    Options,
+    Settings,
     ConfigureControls,
     Scores,
     About,
@@ -64,10 +69,10 @@ impl std::fmt::Display for Menu {
             Menu::Title => "Title Screen",
             Menu::NewGame => "New Game",
             Menu::Game { game, .. } => &format!("Game: {}", game.config().gamemode.name),
-            Menu::GameOver => "Game Over",
-            Menu::GameComplete => "Game Completed",
+            Menu::GameOver(_) => "Game Over",
+            Menu::GameComplete(_) => "Game Completed",
             Menu::Pause => "Pause",
-            Menu::Options => "Options",
+            Menu::Settings => "Settings",
             Menu::ConfigureControls => "Configure Controls",
             Menu::Scores => "Scoreboard",
             Menu::About => "About",
@@ -149,7 +154,7 @@ impl<T: Write> App<T> {
             NonZeroU32::MIN,
             true,
             None,
-            Stat::Lines(0),
+            Stat::Pieces(0),
         );
         let games_finished = Self::load_games().unwrap_or(Vec::new());
         Self {
@@ -161,8 +166,21 @@ impl<T: Write> App<T> {
         }
     }
 
-    fn save_games(games_finished: &Vec<GameFinishedStats>) -> io::Result<()> {
-        let save_str = serde_json::to_string(games_finished)?;
+    fn save_games(games_finished: &[GameFinishedStats]) -> io::Result<()> {
+        let relevant_games_finished = games_finished
+            .iter()
+            .filter(|game_finished_stats| {
+                game_finished_stats.was_successful()
+                    || match game_finished_stats.gamemode.optimize {
+                        Stat::Time(dur) => dur > Duration::from_secs(20),
+                        Stat::Pieces(pcs) => pcs > 10,
+                        Stat::Lines(lns) => lns > 0,
+                        Stat::Level(lvl) => lvl.get() > 1,
+                        Stat::Score(pts) => pts > 0,
+                    }
+            })
+            .collect::<Vec<_>>();
+        let save_str = serde_json::to_string(&relevant_games_finished)?;
         let mut file = File::create(Self::SAVE_FILE)?;
         // TODO: Handle error?
         let _ = file.write(save_str.as_bytes())?;
@@ -205,11 +223,11 @@ impl<T: Write> App<T> {
                     game_renderer,
                 ),
                 Menu::Pause => self.pause(),
-                Menu::GameOver => self.gameover(),
-                Menu::GameComplete => self.gamecomplete(),
+                Menu::GameOver(game_finished_stats) => self.gameover(game_finished_stats),
+                Menu::GameComplete(game_finished_stats) => self.gamecomplete(game_finished_stats),
                 Menu::Scores => self.scores(),
                 Menu::About => self.about(),
-                Menu::Options => self.options(),
+                Menu::Settings => self.settings(),
                 Menu::ConfigureControls => self.configurecontrols(),
                 Menu::Quit(string) => break string.clone(),
             }?;
@@ -223,7 +241,7 @@ impl<T: Write> App<T> {
                 MenuUpdate::Push(menu) => {
                     if matches!(
                         menu,
-                        Menu::Title | Menu::Game { .. } | Menu::GameOver | Menu::GameComplete
+                        Menu::Title | Menu::Game { .. } | Menu::GameOver(_) | Menu::GameComplete(_)
                     ) {
                         menu_stack.clear();
                     }
@@ -371,7 +389,7 @@ impl<T: Write> App<T> {
     fn title(&mut self) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
-            Menu::Options,
+            Menu::Settings,
             Menu::Scores,
             Menu::About,
             Menu::Quit("quit from title menu. Have a nice day!".to_string()),
@@ -386,7 +404,7 @@ impl<T: Write> App<T> {
             Gamemode::ultra(NonZeroU32::try_from(5).unwrap()),
             Gamemode::master(),
         ];
-        let (d_time, d_score, d_pieces, d_lines, d_level) = (Duration::from_secs(5), 200, 1, 5, 1);
+        let (d_time, d_score, d_pieces, d_lines, d_level) = (Duration::from_secs(5), 200, 10, 5, 1);
         let mut selected = 0usize;
         let mut selected_custom = 0usize;
         // There are the preset gamemodes + custom gamemode.
@@ -660,61 +678,18 @@ impl<T: Write> App<T> {
         // Game Loop
         let session_resumed = Instant::now();
         *total_duration_paused += session_resumed.saturating_duration_since(*last_paused);
+        let mut clean_screen = false;
         let mut f = 0u32;
-        let next_menu = 'render_loop: loop {
+        let menu_update = 'render_loop: loop {
             // Exit if game ended
-            if let Some(good_end) = game.finished() {
-                let mut gamemode = game.config().gamemode.clone();
-                gamemode.optimize = match gamemode.optimize {
-                    Stat::Time(_) => Stat::Time(game.state().game_time),
-                    Stat::Pieces(_) => Stat::Pieces(game.state().pieces_played.iter().sum()),
-                    Stat::Lines(_) => Stat::Lines(game.state().lines_cleared.len()),
-                    Stat::Level(_) => Stat::Level(game.state().level),
-                    Stat::Score(_) => Stat::Score(game.state().score),
-                };
-                let game_finished_stats = GameFinishedStats {
-                    timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string(),
-                    actions: game_running_stats.0,
-                    score_bonuses: game_running_stats.1.clone(),
-                    gamemode,
-                    last_state: game.state().clone(),
-                };
-                self.games_finished.push(game_finished_stats);
-                self.games_finished
-                    .sort_by(|game_finished_stats_1, game_finished_stats_2| {
-                        let (gm1, gm2) = (
-                            &game_finished_stats_1.gamemode,
-                            &game_finished_stats_2.gamemode,
-                        );
-                        gm1.limit.cmp(&gm2.limit).then_with(|| {
-                            // NOW: Same limit.
-                            let sort_descendingly = if std::mem::discriminant(&gm1.optimize)
-                                == std::mem::discriminant(&gm1.optimize)
-                            {
-                                // NOW: Same optimization type.
-                                if let Some(gm1_limit) = gm1.limit {
-                                    gm1.optimize > gm1_limit
-                                } else {
-                                    // TODO: This would have to change if `Stat::Finesse` were introduced, since we want to sort that ascendingly/minimize on scoreboard.
-                                    true
-                                }
-                            } else {
-                                // "Whatever" case.
-                                false
-                            };
-                            if sort_descendingly {
-                                gm1.optimize.cmp(&gm2.optimize).reverse()
-                            } else {
-                                gm1.optimize.cmp(&gm2.optimize)
-                            }
-                        })
-                    });
-                let menu = if good_end.is_ok() {
+            if game.is_finished() {
+                let game_finished_stats = self.store_game(game, game_running_stats);
+                let menu = if game_finished_stats.was_successful() {
                     Menu::GameComplete
                 } else {
                     Menu::GameOver
-                };
-                break MenuUpdate::Push(menu);
+                }(Box::new(game_finished_stats));
+                break 'render_loop MenuUpdate::Push(menu);
             }
             // Start next frame
             f += 1;
@@ -724,13 +699,25 @@ impl<T: Write> App<T> {
             'idle_loop: loop {
                 let frame_idle_remaining = next_frame_at - Instant::now();
                 match rx.recv_timeout(frame_idle_remaining) {
-                    Ok(Err(true)) => {
+                    Ok(Err(Sig::AbortProgram)) => {
+                        self.store_game(game, game_running_stats);
                         break 'render_loop MenuUpdate::Push(Menu::Quit(
                             "exited with ctrl-c".to_string(),
                         ));
                     }
-                    Ok(Err(false)) => {
+                    Ok(Err(Sig::StopGame)) => {
+                        let game_finished_stats = self.store_game(game, game_running_stats);
+                        break 'render_loop MenuUpdate::Push(Menu::GameOver(Box::new(
+                            game_finished_stats,
+                        )));
+                    }
+                    Ok(Err(Sig::Pause)) => {
+                        *last_paused = Instant::now();
                         break 'render_loop MenuUpdate::Push(Menu::Pause);
+                    }
+                    Ok(Err(Sig::WindowResize)) => {
+                        clean_screen = true;
+                        continue 'idle_loop;
                     }
                     Ok(Ok((instant, button, button_state))) => {
                         buttons_pressed[button] = button_state;
@@ -757,25 +744,84 @@ impl<T: Write> App<T> {
                 };
             }
             // TODO: Make this more elegantly modular.
-            game_renderer.render(self, game, game_running_stats, new_feedback_events)?;
+            game_renderer.render(
+                self,
+                game,
+                game_running_stats,
+                new_feedback_events,
+                clean_screen,
+            )?;
+            clean_screen = false;
         };
-        *last_paused = Instant::now();
-        Ok(next_menu)
+        Ok(menu_update)
+    }
+
+    fn store_game(
+        &mut self,
+        game: &Game,
+        game_running_stats: &mut GameRunningStats,
+    ) -> GameFinishedStats {
+        let mut gamemode = game.config().gamemode.clone();
+        gamemode.optimize = match gamemode.optimize {
+            Stat::Time(_) => Stat::Time(game.state().game_time),
+            Stat::Pieces(_) => Stat::Pieces(game.state().pieces_played.iter().sum()),
+            Stat::Lines(_) => Stat::Lines(game.state().lines_cleared.len()),
+            Stat::Level(_) => Stat::Level(game.state().level),
+            Stat::Score(_) => Stat::Score(game.state().score),
+        };
+        let game_finished_stats = GameFinishedStats {
+            timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string(),
+            actions: game_running_stats.0,
+            score_bonuses: game_running_stats.1.clone(),
+            gamemode,
+            last_state: game.state().clone(),
+        };
+        self.games_finished.push(game_finished_stats.clone());
+        self.games_finished
+            .sort_by(|game_finished_stats_1, game_finished_stats_2| {
+                let (gm1, gm2) = (
+                    &game_finished_stats_1.gamemode,
+                    &game_finished_stats_2.gamemode,
+                );
+                gm1.limit.cmp(&gm2.limit).then_with(|| {
+                    // NOW: Same limit.
+                    let sort_descendingly = if std::mem::discriminant(&gm1.optimize)
+                        == std::mem::discriminant(&gm1.optimize)
+                    {
+                        // NOW: Same optimization type.
+                        if let Some(gm1_limit) = gm1.limit {
+                            gm1.optimize > gm1_limit
+                        } else {
+                            // TODO: This would have to change if `Stat::Finesse` were introduced, since we want to sort that ascendingly/minimize on scoreboard.
+                            true
+                        }
+                    } else {
+                        // "Whatever" case.
+                        false
+                    };
+                    if sort_descendingly {
+                        gm1.optimize.cmp(&gm2.optimize).reverse()
+                    } else {
+                        gm1.optimize.cmp(&gm2.optimize)
+                    }
+                })
+            });
+        game_finished_stats
     }
 
     fn generic_game_finished(
         &mut self,
         selection: Vec<Menu>,
         success: bool,
+        game_finished_stats: &GameFinishedStats,
     ) -> io::Result<MenuUpdate> {
-        // SAFETY: We only call this function after at least one game has been finished.
         let GameFinishedStats {
             timestamp: _,
             actions,
             score_bonuses,
             gamemode,
             last_state,
-        } = self.games_finished.last().unwrap();
+        } = game_finished_stats;
         let GameState {
             game_time,
             finished: _,
@@ -947,38 +993,38 @@ impl<T: Write> App<T> {
         }
     }
 
-    fn gameover(&mut self) -> io::Result<MenuUpdate> {
+    fn gameover(&mut self, game_finished_stats: &GameFinishedStats) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
             Menu::Scores,
-            Menu::Options,
+            Menu::Settings,
             Menu::Quit("quit after game over".to_string()),
         ];
-        self.generic_game_finished(selection, false)
+        self.generic_game_finished(selection, false, game_finished_stats)
     }
 
-    fn gamecomplete(&mut self) -> io::Result<MenuUpdate> {
+    fn gamecomplete(&mut self, game_finished_stats: &GameFinishedStats) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
             Menu::Scores,
-            Menu::Options,
+            Menu::Settings,
             Menu::Quit("quit after game complete".to_string()),
         ];
-        self.generic_game_finished(selection, true)
+        self.generic_game_finished(selection, true, game_finished_stats)
     }
 
     fn pause(&mut self) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
             Menu::Scores,
-            Menu::Options,
+            Menu::Settings,
             Menu::About,
             Menu::Quit("quit from pause".to_string()),
         ];
         self.generic_placeholder_widget("Paused", selection)
     }
 
-    fn options(&mut self) -> io::Result<MenuUpdate> {
+    fn settings(&mut self) -> io::Result<MenuUpdate> {
         let selection_len = 2;
         let mut selected = 0usize;
         loop {
@@ -1240,7 +1286,7 @@ impl<T: Write> App<T> {
                 .skip(scroll)
                 .take(max_entries)
                 .map(
-                    |GameFinishedStats {
+                    |gfs @ GameFinishedStats {
                          timestamp,
                          actions: _,
                          score_bonuses: _,
@@ -1263,17 +1309,16 @@ impl<T: Write> App<T> {
                             },
                             match gamemode.limit {
                                 None => "no".to_string(),
-                                Some(Stat::Lines(lns)) => format!("{lns} line"),
-                                Some(Stat::Level(lvl)) => format!("{lvl} level"),
-                                Some(Stat::Score(pts)) => format!("{pts} points"),
-                                Some(Stat::Pieces(pcs)) => format!("{pcs} piece"),
+                                Some(Stat::Lines(lns)) => format!("{lns} ln"),
+                                Some(Stat::Level(lvl)) => format!("{lvl} lvl"),
+                                Some(Stat::Score(pts)) => format!("{pts} pts"),
+                                Some(Stat::Pieces(pcs)) => format!("{pcs} pcs"),
                                 Some(Stat::Time(dur)) => format_duration(dur),
                             },
-                            // SAFETY: Unfinished games cannot be passed up to this point.
-                            if last_state.finished.unwrap().is_err() {
-                                " *not fin."
-                            } else {
+                            if gfs.was_successful() {
                                 ""
+                            } else {
+                                " *not fin."
                             },
                             timestamp,
                         )
@@ -1349,7 +1394,10 @@ impl<T: Write> App<T> {
 
     fn about(&mut self) -> io::Result<MenuUpdate> {
         /* TODO: About menu. */
-        self.generic_placeholder_widget("About Tetrs - See https://github.com/Strophox/tetrs", vec![])
+        self.generic_placeholder_widget(
+            "About Tetrs - See https://github.com/Strophox/tetrs",
+            vec![],
+        )
     }
 }
 

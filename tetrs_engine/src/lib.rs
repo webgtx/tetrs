@@ -522,8 +522,8 @@ impl Game {
         Game { config, state, rng }
     }
 
-    pub fn finished(&self) -> Option<Result<(), GameOver>> {
-        self.state.finished
+    pub fn is_finished(&self) -> bool {
+        self.state.finished.is_some()
     }
 
     pub fn state(&self) -> &GameState {
@@ -716,9 +716,12 @@ impl Game {
                     .config
                     .preview_count
                     .saturating_sub(self.state.next_pieces.len());
-                self.state
-                    .next_pieces
-                    .extend(self.config.tetromino_generator.with_rng(&mut self.rng).take(n_required_pieces));
+                self.state.next_pieces.extend(
+                    self.config
+                        .tetromino_generator
+                        .with_rng(&mut self.rng)
+                        .take(n_required_pieces),
+                );
                 let tetromino = self
                     .state
                     .next_pieces
@@ -945,8 +948,6 @@ impl Game {
                 ),
             )
         });
-        self.state.board.remove(0);
-        self.state.board.push(Default::default());
         Ok(feedback_events)
     }
 

@@ -1,7 +1,10 @@
 use std::num::NonZeroU32;
 
 use rand::{
-    self, distributions::{Distribution, WeightedIndex}, rngs::ThreadRng, Rng
+    self,
+    distributions::{Distribution, WeightedIndex},
+    rngs::ThreadRng,
+    Rng,
 };
 
 use crate::Tetromino;
@@ -48,7 +51,10 @@ impl TetrominoGenerator {
         }
     }
 
-    pub(crate) fn with_rng<'a, 'b>(&'a mut self, rng: &'b mut ThreadRng) -> TetrominoIterator<'a, 'b> {
+    pub(crate) fn with_rng<'a, 'b>(
+        &'a mut self,
+        rng: &'b mut ThreadRng,
+    ) -> TetrominoIterator<'a, 'b> {
         TetrominoIterator {
             tetromino_generator: self,
             rng,
