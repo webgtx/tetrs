@@ -481,7 +481,7 @@ impl GameScreenRenderer for Renderer {
                     lineclears,
                     perfect_clear,
                     combo,
-                    opportunity,
+                    opportunity: _,
                 } => {
                     action_stats.1.push(*score_bonus);
                     let mut strs = Vec::new();
@@ -523,14 +523,7 @@ impl GameScreenRenderer for Renderer {
                     } else {
                         // TODO: Record higher lineclears, if even possible.
                     }
-                    let excl = match opportunity {
-                        1 => "'",
-                        2 => "!",
-                        3 => "!'",
-                        4 => "!!",
-                        _ => "?!",
-                    };
-                    strs.push(format!("{clear_action}{excl}"));
+                    strs.push(clear_action);
                     if *combo > 1 {
                         strs.push(format!("combo.{combo}"));
                     }
@@ -550,7 +543,7 @@ impl GameScreenRenderer for Renderer {
             self.screen.buf_str(message, None, pos);
         }
         self.messages.retain(|(event_time, _message)| {
-            game_time.saturating_sub(*event_time) < Duration::from_millis(8000)
+            game_time.saturating_sub(*event_time) < Duration::from_millis(6000)
         });
         self.screen.flush(&mut app.term)
     }
