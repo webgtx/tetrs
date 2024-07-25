@@ -14,12 +14,21 @@ pub fn make_game() -> Game {
     // SAFETY: 255 > 0.
     #[rustfmt::skip]
     let puzzles = [
+        /* Puzzle template.
+        ("puzzlename", vec![
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+        ], VecDeque::from([Tetromino::I,])),
+        */
         ("Intro", vec![
             b"OOO    OOO",
             b"OOOO  OOOO",
             b"OOOOO OOOO",
             b"OOOOO OOOO",
         ], VecDeque::from([Tetromino::I,Tetromino::L])),
+        // I-spin puzzles.
         ("I-spin (i)", vec![
             b"OOOOO OOOO",
             b"OOOOO OOOO",
@@ -47,14 +56,35 @@ pub fn make_game() -> Game {
             b"OOOO OOOOO",
             b"OOOO OOOOO",
         ], VecDeque::from([Tetromino::I,Tetromino::L,Tetromino::O,])),
-        /* Stage Template.
-        ("puzzlename", vec![
-            b"OOOOOOOOOO",
-            b"OOOOOOOOOO",
-            b"OOOOOOOOOO",
-            b"OOOOOOOOOO",
-        ], VecDeque::from([Tetromino::I,])),
-        */
+        // S- and Z-spin puzzles.
+        ("S-spin (i)", vec![
+            b"OOOO  OOOO",
+            b"OOO  OOOOO",
+        ], VecDeque::from([Tetromino::S,])),
+        ("S-spin (ii)", vec![
+            b"OOOO    OO",
+            b"OOO    OOO",
+            b"OOOOO  OOO",
+            b"OOOO  OOOO",
+        ], VecDeque::from([Tetromino::S,Tetromino::S,Tetromino::S,])),
+        ("SuZ-spin (iii)", vec![
+            b"OOOO  OOOO",
+            b"OOO  OOOOO",
+            b"OO    OOOO",
+            b"OO    OOOO",
+            b"OOO    OOO",
+            b"OO  OO  OO",
+        ], VecDeque::from([Tetromino::S,Tetromino::S,Tetromino::I,Tetromino::I,Tetromino::Z,])),
+        ("ZZZZ", vec![
+            b"O  OOOOOOO",
+            b"OO  OOOOOO",
+            b"OOO  OOOOO",
+            b"OOOO  OOOO",
+            b"OOOOO  OOO",
+            b"OOOOOO  OO",
+            b"OOOOOOO  O",
+            b"OOOOOOOO  ",
+        ], VecDeque::from([Tetromino::Z,Tetromino::Z,Tetromino::Z,Tetromino::Z,])),
     ];
     let total_lines = puzzles
         .iter()

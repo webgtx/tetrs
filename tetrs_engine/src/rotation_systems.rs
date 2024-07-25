@@ -139,7 +139,7 @@ fn rotate_ocular(piece: &ActivePiece, board: &Board, right_turns: i32) -> Option
                 }
             },
             Tetromino::L => break match orientation {
-                N => if left { [( 0,-1), ( 1,-1), ( 0, 0), ( 0,-1), ( 1, 0)].iter() }
+                N => if left { [( 0,-1), ( 1,-1), ( 0, 0), ( 0,-2), ( 1, 0)].iter() }
                         else { [( 1,-1), ( 1, 0), ( 2, 0), ( 0, 0)].iter() },
                 E => if left { [(-1, 1), (-1, 0), ( 0, 1), (-2, 0), ( 0, 0)].iter() }
                         else { [(-1, 0), ( 0, 0), ( 0,-1), ( 0, 1)].iter() },
