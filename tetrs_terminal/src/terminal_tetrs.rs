@@ -16,7 +16,8 @@ use crossterm::{
         KeyModifiers,
     },
     style::{self, Print, PrintStyledContent, Stylize},
-    terminal, ExecutableCommand, QueueableCommand,
+    terminal::{self, Clear},
+    ExecutableCommand, QueueableCommand,
 };
 use tetrs_engine::{
     Button, ButtonsPressed, Feedback, FeedbackEvents, Game, GameConfig, GameOver, GameState,
@@ -795,6 +796,24 @@ impl<T: Write> App<T> {
                 }
             }
         };
+        if let Some(finish_state) = game.state().finished {
+            let h_console = terminal::size()?.1;
+            if finish_state.is_ok() {
+                for i in 0..h_console {
+                    self.term
+                        .execute(MoveTo(0, i))?
+                        .execute(Clear(terminal::ClearType::CurrentLine))?;
+                    std::thread::sleep(Duration::from_secs_f32(0.01));
+                }
+            } else {
+                for i in (0..h_console).rev() {
+                    self.term
+                        .execute(MoveTo(0, i))?
+                        .execute(Clear(terminal::ClearType::CurrentLine))?;
+                    std::thread::sleep(Duration::from_secs_f32(0.01));
+                }
+            };
+        }
         Ok(menu_update)
     }
 
@@ -825,27 +844,29 @@ impl<T: Write> App<T> {
                     &game_finished_stats_1.gamemode,
                     &game_finished_stats_2.gamemode,
                 );
-                gm1.limit.cmp(&gm2.limit).then_with(|| {
-                    // NOW: Same limit.
-                    let sort_descendingly = if std::mem::discriminant(&gm1.optimize)
-                        == std::mem::discriminant(&gm1.optimize)
-                    {
-                        // NOW: Same optimization type.
-                        if let Some(gm1_limit) = gm1.limit {
-                            gm1.optimize > gm1_limit
+                gm1.name.cmp(&gm2.name).then_with(|| {
+                    gm1.limit.cmp(&gm2.limit).then_with(|| {
+                        // NOW: Same limit.
+                        let sort_descendingly = if std::mem::discriminant(&gm1.optimize)
+                            == std::mem::discriminant(&gm1.optimize)
+                        {
+                            // NOW: Same optimization type.
+                            if let Some(gm1_limit) = gm1.limit {
+                                gm1.optimize > gm1_limit
+                            } else {
+                                // TODO: This would have to change if `Stat::Finesse` were introduced, since we want to sort that ascendingly/minimize on scoreboard.
+                                true
+                            }
                         } else {
-                            // TODO: This would have to change if `Stat::Finesse` were introduced, since we want to sort that ascendingly/minimize on scoreboard.
-                            true
+                            // "Whatever" case.
+                            false
+                        };
+                        if sort_descendingly {
+                            gm1.optimize.cmp(&gm2.optimize).reverse()
+                        } else {
+                            gm1.optimize.cmp(&gm2.optimize)
                         }
-                    } else {
-                        // "Whatever" case.
-                        false
-                    };
-                    if sort_descendingly {
-                        gm1.optimize.cmp(&gm2.optimize).reverse()
-                    } else {
-                        gm1.optimize.cmp(&gm2.optimize)
-                    }
+                    })
                 })
             });
         game_finished_stats
@@ -913,15 +934,18 @@ impl<T: Write> App<T> {
             let (x_main, y_main) = Self::fetch_main_xy();
             let y_selection = Self::H_MAIN / 5;
             self.term
-                .queue(terminal::Clear(terminal::ClearType::All))?
+                .queue(Clear(terminal::ClearType::All))?
                 .queue(MoveTo(x_main, y_main + y_selection))?
                 .queue(Print(format!(
                     "{:^w_main$}",
-                    format!(
-                        "Game {}! - {}",
-                        if success { "Completed" } else { "Over" },
-                        gamemode.name.to_ascii_uppercase()
-                    )
+                    if success {
+                        format!(
+                            "++ Game Completed! ({}) ++",
+                            gamemode.name.to_ascii_uppercase()
+                        )
+                    } else {
+                        format!("-- Game Over. ({}) --", gamemode.name)
+                    }
                 )))?
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?
@@ -1379,7 +1403,7 @@ impl<T: Write> App<T> {
                          last_state,
                      }| {
                         format!(
-                            "{}: {} ({} limit{}) @{}",
+                            "{}: {} ({} lim.) ~{}",
                             gamemode.name,
                             match gamemode.optimize {
                                 Stat::Lines(_) =>
@@ -1394,16 +1418,50 @@ impl<T: Write> App<T> {
                             },
                             match gamemode.limit {
                                 None => "no".to_string(),
-                                Some(Stat::Lines(lns)) => format!("{lns} ln"),
-                                Some(Stat::Level(lvl)) => format!("{lvl} lvl"),
-                                Some(Stat::Score(pts)) => format!("{pts} pts"),
-                                Some(Stat::Pieces(pcs)) => format!("{pcs} pcs"),
-                                Some(Stat::Time(dur)) => format_duration(dur),
-                            },
-                            if gfs.was_successful() {
-                                ""
-                            } else {
-                                " *not fin."
+                                Some(Stat::Lines(lns)) => format!(
+                                    "{}{lns} ln",
+                                    if gfs.was_successful() {
+                                        "".to_string()
+                                    } else {
+                                        format!("{} /", last_state.lines_cleared.len())
+                                    }
+                                ),
+                                Some(Stat::Level(lvl)) => format!(
+                                    "{}{lvl} lvl",
+                                    if gfs.was_successful() {
+                                        "".to_string()
+                                    } else {
+                                        format!("{} /", last_state.level)
+                                    }
+                                ),
+                                Some(Stat::Score(pts)) => format!(
+                                    "{}{pts} pts",
+                                    if gfs.was_successful() {
+                                        "".to_string()
+                                    } else {
+                                        format!("{} /", last_state.score)
+                                    }
+                                ),
+                                Some(Stat::Pieces(pcs)) => format!(
+                                    "{}{pcs} pcs",
+                                    if gfs.was_successful() {
+                                        "".to_string()
+                                    } else {
+                                        format!(
+                                            "{} /",
+                                            last_state.pieces_played.iter().sum::<u32>()
+                                        )
+                                    }
+                                ),
+                                Some(Stat::Time(dur)) => format!(
+                                    "{}{}",
+                                    if gfs.was_successful() {
+                                        "".to_string()
+                                    } else {
+                                        format!("{} /", format_duration(last_state.game_time))
+                                    },
+                                    format_duration(dur),
+                                ),
                             },
                             timestamp,
                         )
