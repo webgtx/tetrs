@@ -1,14 +1,9 @@
-use std::{
-    collections::VecDeque,
-    num::NonZeroU32,
-    time::Duration,
-};
+use std::{collections::VecDeque, num::NonZeroU32, time::Duration};
 
 use tetrs_engine::{
-    Feedback, FeedbackEvents, Game, GameConfig, GameOver, GameState,
-    Gamemode, InternalEvent, Stat, Tetromino,
+    Feedback, FeedbackEvents, Game, GameConfig, GameOver, GameState, Gamemode, InternalEvent, Stat,
+    Tetromino,
 };
-
 
 pub fn make_game() -> Game {
     const SPEED_LEVEL: NonZeroU32 = NonZeroU32::MIN.saturating_add(1);
@@ -17,23 +12,29 @@ pub fn make_game() -> Game {
     let mut puzzle_piece_stamp = 0;
     #[allow(non_snake_case)]
     // SAFETY: 255 > 0.
-    let (r, W) = (None, Some(unsafe { NonZeroU32::new_unchecked(255) }));
     #[rustfmt::skip]
     let puzzles = [
-        // 1: I Spin
+        ("Intro", vec![
+            b"OOO    OOO",
+            b"OOOO  OOOO",
+            b"OOOOO OOOO",
+            b"OOOOO OOOO",
+        ], VecDeque::from([Tetromino::I,Tetromino::L])),
         ("I-Spin (I)", vec![
-            [W,W,W,W,W,r,W,W,W,W],
-            [W,W,W,W,W,r,W,W,W,W],
-            [W,W,W,W,W,r,W,W,W,W],
-            [W,W,W,W,W,r,W,W,W,W],
-            [W,W,W,W,r,r,r,r,W,W],
+            b"OOOOO OOOO",
+            b"OOOOO OOOO",
+            b"OOOOO OOOO",
+            b"OOOOO OOOO",
+            b"OOOO    OO",
         ], VecDeque::from([Tetromino::I,Tetromino::I])),
-        ("r", vec![
-            [W,W,W,W,W,W,W,W,W,r],
-            [W,W,W,W,W,W,W,W,W,r],
-            [W,W,W,W,W,W,W,W,W,r],
-            [W,W,W,W,W,W,W,W,W,r],
-        ], VecDeque::from([Tetromino::I])),
+        /* Stage Template.
+        ("puzzlename", vec![
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+            b"OOOOOOOOOO",
+        ], VecDeque::from([Tetromino::I,])),
+        */
     ];
     let total_lines = puzzles
         .iter()
@@ -64,6 +65,11 @@ pub fn make_game() -> Game {
                             state.game_time,
                             Feedback::Message("# Puzzle completed!".to_string()),
                         ));
+                    } else {
+                        feedback_events.push((
+                            state.game_time,
+                            Feedback::Message("# Get a perfect clear.".to_string()),
+                        ));
                     }
                     puzzle_num += 1;
                     feedback_events.push((
@@ -76,8 +82,14 @@ pub fn make_game() -> Game {
                     state.next_pieces = puzzle_pieces;
                     // Additional piece for consistent end preview.
                     state.next_pieces.push_back(Tetromino::O);
-                    for (y, line) in puzzle_lines.into_iter().rev().enumerate() {
-                        state.board[y] = line;
+                    for (y, line_template) in puzzle_lines.iter().rev().enumerate() {
+                        state.board[y] = line_template.map(|b| {
+                            if b == b' ' {
+                                None
+                            } else {
+                                Some(unsafe { NonZeroU32::new_unchecked(255) })
+                            }
+                        });
                         // Set puzzle limit
                     }
                 }

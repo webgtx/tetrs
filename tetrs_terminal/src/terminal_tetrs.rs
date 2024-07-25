@@ -19,13 +19,13 @@ use crossterm::{
     terminal::{self, Clear},
     ExecutableCommand, QueueableCommand,
 };
-use tetrs_engine::{
-    Button, ButtonsPressed, Game, GameState,
-    Gamemode, RotationSystem, Stat,
-};
+use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, RotationSystem, Stat};
 
-use crate::{game_input_handler::{ButtonSignal, CrosstermHandler, Sig}, puzzle_mode};
 use crate::game_renderers::{cached::Renderer, GameScreenRenderer};
+use crate::{
+    game_input_handler::{ButtonSignal, CrosstermHandler, Sig},
+    puzzle_mode,
+};
 
 // NOTE: This could be more general and less ad-hoc. Count number of I-Spins, J-Spins, etc..
 pub type GameRunningStats = ([u32; 5], Vec<u32>);
