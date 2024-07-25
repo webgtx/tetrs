@@ -532,7 +532,7 @@ impl GameScreenRenderer for Renderer {
                     };
                     strs.push(format!("{clear_action}{excl}"));
                     if *combo > 1 {
-                        strs.push(format!("[{combo}.combo]"));
+                        strs.push(format!("combo.{combo}"));
                     }
                     self.messages.push((*event_time, strs.join(" ")));
                     *relevant = false;
@@ -550,7 +550,7 @@ impl GameScreenRenderer for Renderer {
             self.screen.buf_str(message, None, pos);
         }
         self.messages.retain(|(event_time, _message)| {
-            game_time.saturating_sub(*event_time) < Duration::from_millis(6000)
+            game_time.saturating_sub(*event_time) < Duration::from_millis(8000)
         });
         self.screen.flush(&mut app.term)
     }
