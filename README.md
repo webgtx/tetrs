@@ -25,7 +25,7 @@
 Implemented features:
 - **Gamemodes**:
   - Marathon, Sprint, Ultra, Master, Endless.
-  - Puzzle Mode: Find all perfect clears through some piece acrobatics (\*Requires and demonstrates the Ocular Rotation System).
+  - Puzzle Mode: Find all perfect clears through some [*Ocular Rotation System*](#ocular-rotation-system) piece acrobatics (one retry per puzzle stage).
   - Custom Mode: level start, level increment, limit *(Time, Score, Pieces, Lines, Level; None)*.
 - **Gameplay**:
   - Colored pieces (guideline).
@@ -34,27 +34,24 @@ Implemented features:
   - Animations for: Hard drops, Line clears and Piece locking.
   - Current game stats: Level, Score, Lines, Time, Pieces generated.
   - For technical details see [Features of the Tetrs Engine](#features-of-the-tetrs-engine).
+- **Scoreboard** (stored to / loaded from local *tetrs_terminal_scores.json* if possible).
 - **Settings**:
-  - Configurable controls.
   - Adjustable render rate and toggleable FPS counter.
-  - Rotation systems
-    - Default: [*Ocular Rotation System*](#ocular-rotation-system)
-    - *Classic* and *Super* also available.
-- **Scoreboard** (stored to / loaded from *tetrs_terminal_scores.json* if available).
-
-The game controls default to the following:
-| Key | Action |
-| -: | :-: |
-| `A` | Rotate left |
-| `D` | Rotate right |
-| (not set) | Rotate around/180° |
-| `←` | Move left |
-| `→` | Move right |
-| `↓` | Soft drop |
-| `↑` | Hard drop |
-| `Esc` | Pause game |
-| `Ctrl`+`D` | Forfeit game |
-| `Ctrl`+`C` | Exit program |
+  - Rotation systems: *Ocular*, *Classic* and *Super*.
+  - Configurable controls.
+    The game controls default to the following:
+    | Key | Action |
+    | -: | :-: |
+    | `A` | Rotate left |
+    | `D` | Rotate right |
+    | (not set) | Rotate around/180° |
+    | `←` | Move left |
+    | `→` | Move right |
+    | `↓` | Soft drop |
+    | `↑` | Hard drop |
+    | `Esc` | Pause game |
+    | `Ctrl`+`D` | Forfeit game |
+    | `Ctrl`+`C` | Exit program |
 
 ## Backend: `tetrs_engine`
 
@@ -65,66 +62,106 @@ Adding `tetrs_engine` as a [dependency from git](https://doc.rust-lang.org/cargo
 tetrs_engine = { git = "https://github.com/Strophox/tetrs.git" }
 ```
 
-The tetrs engine shifts the responsibility of detecting player input, and choosing the time to update, to the user of the engine.
-The key interactions with the engine look the following:
+The tetrs engine is kept modular in that it shifts the responsibility of detecting player input and chosen time to update to the user of the engine.
+Basic interaction with the engine could look like the following:
 ```rust
-// Starting a game:
+// Starting a game.
 let game = tetrs_engine::Game::with_gamemode(gamemode, time_started);
 
-// Updating the game with a new button state at a point in time:
+// Updating the game with a new button state at a point in time.
 game.update(Some(new_button_state), update_time);
-// Updating the game with *no* change in button state (since the last):
+// Updating the game with *no* change in button state (since the last).
 game.update(None, update_time_2);
 
-// Retrieving the game state (to render the board, active piece, next pieces, etc.):
+// Retrieving the game state (to render the board, active piece, next pieces, etc.).
 let GameState { board, .. } = game.state();
 ```
 
 For more info see crate documentation (`cargo doc --open`).
 
 ### Features of the Tetrs Engine
-TODO: Reformulate all this.
 
-The library at the time presents a moderately feature-rich abstraction over a singleplayer game. The goal was to strike the balance between interesting, useful and ergonomic game mechanics, while being as simple and efficient as possible. Luckily Rust being a safe and efficient language with high-level features (abstract datatypes, iterators) proved very apt for this.
+The engine at the time aims to be an interface to a feature-rich session of a singleplayer game.
+The goal was to strike a balance between interesting and useful game mechanics as present in modern games, yet leaving away all that "seems unnecessary".
+Rust, renowned for its performance and safety, proved to be a good choice for this.
 
-**Game Configuration Features**
-- *Gamemodes: Marathon, Sprint, Ultra, Master, CUSTOM (start lvl, inc lvl, limit, optimize) todo!("table here")
-- *Rotation Systems: Ocular, Classic, Super
-- *Tetromino Generators
-- Piece Preview (N=1)
-- Delayed Auto Shift (DAS) 200ms
-- Auto Repeat Rate (ARR) 50ms
-- Soft Drop Factor (SDF) 15.0
-- Drop delay 1s@1->0.833ms@19
-- Hard Drop Delay 0.1ms
-- *Locking: ground_time_max 2.25s and lock curve 500ms@19->150ms@30
-- Line Clear Delay 
-- Appearance Delay (ARE)
+#### Game Configuration
 
-**Game State Features**
-- Abstract game time 
-- Finished state/ Game Over: Lock out, Block out
-- Event queue
-- Buttons pressed state
-- Board state 
-- Active piece (tetromino, orientation, pos) including locking data
-- Next Pieces
-- Pieces played so far
-- Lines cleared
-- *Level and speed curve
-- *Scoring and combo (b2b)
-**Feedback Events**
-- Piece locked: active piece
-- line clears: lines and line clear delay
-- hard drop: active piece before after
-- Accolade: score bonus, shape, spin, lines, perfect, combo, opportunity
-- Debug: String.
+- Gamemodes: Marathon, Sprint, Ultra, Master; Custom, given a playing limit, start lvl, whether to increment level.
+- Rotation Systems: *Ocular Rotation System*, *Classic Rotation System*, *Super Rotation System*.
+- Tetromino Generators: *Bag*, *Recency-based*, *Uniformly random*.
+- Piece Preview (default N = 1)
+- Delayed Auto Shift (default DAS = 200ms)
+- Auto Repeat Rate (default ARR = 50ms)
+- Soft Drop Factor (default SDF = 15.0)
+- Hard drop delay (default at 0.1ms)
+- Line clear delay (default at 200ms)
+- Appearance Delay (default ARE = 100ms)
 
-### Tetrs Engine: Highlights
+Currently, drop delay and lock delay\* *(\*But not total ground time)* are a function of the current level:
+- Drop delay (1000ms at lvl 1 to 0.833ms ("20G") at lvl 19).
+- 'Timer' variant of Extended Placement Lockdown (step reset); The piece tries to lock every 500ms at lvl 19 to every 150ms at lvl 30, and any given piece may only touch ground for 2250ms in total. See also [Piece Locking](#piece-locking).
+
+#### Game State
+
+- Time: Game time is held abstract as "time elapsed since game started" and is not directly tied to real-world timestamps.
+- Game finish: The game knows if it finished, and if session was won or lost. Game Over scenarios are:
+  - Block out: newly piece spawn location is occupied.
+  - Lock out: a piece was completely locked above the skyline (row 21 and above).
+- Event queue: All game events are kept in an internal queue that is stepped through, up to the provided timestamp of a `Game::update` call.
+- Buttons pressed state: The game keeps an abstract state of which buttons are currently pressed.
+- Board state: Yes.
+- Active piece: The active piece is stored as a (tetromino, orientation, position) tuple plus some locking data.
+- Next Pieces: Are kept in a queue and can be viewed.
+- Pieces played so far: Kept as a stat.
+- Lines cleared: <sup>yeah</sup>
+- Level: Increases every 10 line clears. and speed curve
+- Scoring: Only line clears award a score bonus, which is given by the formula:
+  ```haskell
+  score_bonus = 10
+              * (lines ^ 2)
+              * (if spin then 4 else 1)
+              * (if perfect then 16 else 1)
+              * combo
+              * maximum [1, backToBack * backToBack]
+    where lines = "number of lines cleared simultaneously"
+          spin = "piece could not move up when locking occurred"
+          perfect = "board is empty after line clear"
+          combo = "number of consecutive pieces where line clear occurred"
+          backToBack = maximum [1, "number of consecutive line clears where spin, perfect or quadruple line clear occurred"]
+  ```
+  A table of some bonuses is provided:
+  | Score bonus | Action |
+  | -: | :- |
+  | +10 | Single |
+  | +40 | Double |
+  | +90 | Triple |
+  | +160 | Quadruple |
+  | +20 | Single (2.combo) |
+  | +30 | Single (3.combo) |
+  | +80 | Double (2.combo) |
+  | +120 | Double (3.combo) |
+  | +40 | ?-Spin Single |
+  | +160 | ?-Spin Double |
+  | +360 | ?-Spin Triple |
+
+#### Feedback Events
+
+The game provides some useful feedback events upon every `update`, usually used for frontend effects:
+- *Piece locked down*, *Lines cleared*, *Hard drop*, *Accolade* (score bonus info), *Message* (generic message, currently unused)
+
+## Selection of Project Highlights
 TODO
 
 #### Ocular Rotation System
 TODO
+
+#### Piece Locking
+TODO
+
+#### Scoring
+
+Coming up with a good score system is tough, and experience and playtesting helps, so the one I come up with probably sucks ("how many points should a 'perfect clear' receive?"). Even so, I went along and experimented, since I liked the idea of [rewarding all spins](https://harddrop.com/wiki/List_of_twists).
 
 ## Author Notes
 This project allowed me to have first proper learning experience with programming a larger Rust project, an interactive game (in the console), and the intricacies of the Game mechanics themselves (see [Features of the Tetrs Engine](#features-of-the-tetrs-engine)).
