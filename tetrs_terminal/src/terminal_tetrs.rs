@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Debug,
     fs::File,
     io::{self, Read, Write},
@@ -18,7 +18,10 @@ use crossterm::{
     style::{self, Print, PrintStyledContent, Stylize},
     terminal, ExecutableCommand, QueueableCommand,
 };
-use tetrs_engine::{Button, ButtonsPressed, Game, GameState, Gamemode, RotationSystem, Stat};
+use tetrs_engine::{
+    Button, ButtonsPressed, Feedback, FeedbackEvents, Game, GameConfig, GameOver, GameState,
+    Gamemode, InternalEvent, RotationSystem, Stat, Tetromino,
+};
 
 use crate::game_input_handler::{ButtonSignal, CrosstermHandler, Sig};
 use crate::game_renderers::{cached::Renderer, GameScreenRenderer};
@@ -412,7 +415,7 @@ impl<T: Write> App<T> {
         let mut selected = 0usize;
         let mut selected_custom = 0usize;
         // There are the preset gamemodes + custom gamemode.
-        let selected_cnt = preset_gamemodes.len() + 1;
+        let selected_cnt = preset_gamemodes.len() + 2;
         // There are four columns for the custom stat selection.
         let selected_custom_cnt = 4;
         loop {
@@ -448,6 +451,20 @@ impl<T: Write> App<T> {
                         }
                     )))?;
             }
+            // Render puzzle mode option.
+            self.term
+                .queue(MoveTo(
+                    x_main,
+                    y_main + y_selection + 4 + 2 * u16::try_from(selected_cnt - 2).unwrap(),
+                ))?
+                .queue(Print(format!(
+                    "{:^w_main$}",
+                    if selected == selected_cnt - 2 {
+                        ">>> Puzzle Mode: Find the perfect clears!"
+                    } else {
+                        "Puzzle Mode..."
+                    }
+                )))?;
             // Render custom mode option.
             self.term
                 .queue(MoveTo(
@@ -458,9 +475,9 @@ impl<T: Write> App<T> {
                     "{:^w_main$}",
                     if selected == selected_cnt - 1 {
                         if selected_custom == 0 {
-                            "▓▓> Custom Mode: (*change 'limit' by pressing right repeatedly)"
+                            "▓▓> Custom Mode: (press right repeatedly to change 'limit')"
                         } else {
-                            "  > Custom Mode: (*change 'limit' by pressing right repeatedly)"
+                            "  > Custom Mode: (press right repeatedly to change 'limit')"
                         }
                     } else {
                         "Custom Mode..."
@@ -476,7 +493,7 @@ impl<T: Write> App<T> {
                 for (j, stat_str) in stats_strs.into_iter().enumerate() {
                     self.term
                         .queue(MoveTo(
-                            x_main + 15 + 4 * u16::try_from(j).unwrap(),
+                            x_main + 16 + 4 * u16::try_from(j).unwrap(),
                             y_main + y_selection + 4 + u16::try_from(j + 2 * selected_cnt).unwrap(),
                         ))?
                         .queue(Print(if j + 1 == selected_custom {
@@ -512,13 +529,14 @@ impl<T: Write> App<T> {
                     kind: Press,
                     ..
                 }) => {
-                    let mode = if selected < selected_cnt - 1 {
-                        // SAFETY: Index is valid.
-                        preset_gamemodes.into_iter().nth(selected).unwrap()
+                    let mut game = if selected == selected_cnt - 1 {
+                        Game::with_gamemode(self.custom_mode.clone())
+                    } else if selected == selected_cnt - 2 {
+                        generate_puzzle_game()
                     } else {
-                        self.custom_mode.clone()
+                        // SAFETY: Index < selected_cnt - 2 = preset_gamemodes.len().
+                        Game::with_gamemode(preset_gamemodes.into_iter().nth(selected).unwrap())
                     };
-                    let mut game = Game::with_gamemode(mode);
                     game.config_mut().rotation_system = self.settings.rotation_system;
                     let now = Instant::now();
                     break Ok(MenuUpdate::Push(Menu::Game {
@@ -1507,4 +1525,91 @@ pub fn format_keybinds(button: Button, keybinds: &HashMap<KeyCode, Button>) -> S
         .filter_map(|(&k, &b)| (b == button).then_some(format_key(k)))
         .collect::<Vec<String>>()
         .join(" ")
+}
+
+fn generate_puzzle_game() -> Game {
+    let mut game = Game::with_gamemode(Gamemode::custom(
+        "Puzzle".to_string(),
+        NonZeroU32::MIN,
+        false,
+        Some(Stat::Pieces(10)),
+        Stat::Time(Duration::ZERO),
+    ));
+    let mut init = false;
+    let mut puzzle_num = 0;
+    let mut puzzle_piece_stamp = 0;
+    #[allow(non_snake_case)]
+    // SAFETY: 255 > 0.
+    let (r, W) = (None, Some(unsafe { NonZeroU32::new_unchecked(255) }));
+    #[rustfmt::skip]
+    let mut batches = [
+        // 1: I Spin
+        ("I-Spin (I)", vec![
+            [W,W,W,W,W,r,W,W,W,W],
+            [W,W,W,W,W,r,W,W,W,W],
+            [W,W,W,W,W,r,W,W,W,W],
+            [W,W,W,W,W,r,W,W,W,W],
+            [W,W,W,W,r,r,r,r,W,W],
+        ], VecDeque::from([Tetromino::I, Tetromino::I, Tetromino::O])),
+        ("", vec![
+            [W,W,W,W,W,W,W,W,W,W],
+            [W,W,W,W,W,W,W,W,W,W],
+            [W,W,W,W,W,W,W,W,W,W],
+            [W,W,W,W,W,W,W,W,W,W],
+            [W,W,W,W,W,W,W,W,W,W],
+            ], VecDeque::from([Tetromino::I, Tetromino::I, Tetromino::O])),
+    ].into_iter();
+    let game_modifier = move |upcoming_event: Option<InternalEvent>,
+                              config: &mut GameConfig,
+                              state: &mut GameState,
+                              feedback_events: &mut FeedbackEvents| {
+        // Initialize internal game state.
+        if !init {
+            config.preview_count = 1;
+            init = true;
+        }
+        // Puzzle may have failed.
+        let game_piece_stamp = state.pieces_played.iter().sum::<u32>();
+        if upcoming_event == Some(InternalEvent::Spawn) && game_piece_stamp == puzzle_piece_stamp {
+            // If board is cleared successfully load in next batch.
+            if state.board.iter().all(|line| {
+                line.iter().all(|cell| cell.is_none()) || line.iter().all(|cell| cell.is_some())
+            }) {
+                // Load in new puzzle.
+                if let Some((puzzle_name, puzzle_lines, puzzle_pieces)) = batches.next() {
+                    // Game messages.
+                    if puzzle_num > 0 {
+                        feedback_events.push((
+                            state.game_time,
+                            Feedback::Message("# Puzzle completed!".to_string()),
+                        ));
+                    }
+                    puzzle_num += 1;
+                    feedback_events.push((
+                        state.game_time,
+                        Feedback::Message(format!("# Puzzle {puzzle_num}: {puzzle_name}")),
+                    ));
+                    // Queue pieces and lines.
+                    puzzle_piece_stamp =
+                        game_piece_stamp + u32::try_from(puzzle_pieces.len()).unwrap() - 1;
+                    state.next_pieces = puzzle_pieces;
+                    for (y, line) in puzzle_lines.into_iter().rev().enumerate() {
+                        state.board[y] = line;
+                        // Set puzzle limit
+                    }
+                }
+            } else {
+                // Otherwise game failed
+                state.finished = Some(Err(GameOver::Fail));
+            }
+        }
+        // Hacky way to show the puzzle level.
+        if upcoming_event.is_some() {
+            state.level = NonZeroU32::MIN;
+        } else {
+            state.level = NonZeroU32::try_from(puzzle_num).unwrap();
+        }
+    };
+    game.set_modifier(Some(Box::new(game_modifier)));
+    game
 }

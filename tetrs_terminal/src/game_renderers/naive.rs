@@ -8,7 +8,7 @@ use crossterm::{
     style::{self, Print},
     terminal, QueueableCommand,
 };
-use tetrs_engine::{FeedbackEvent, Game, GameState, GameTime};
+use tetrs_engine::{Feedback, FeedbackEvents, Game, GameState, GameTime};
 
 use crate::{
     game_renderers::GameScreenRenderer,
@@ -17,7 +17,7 @@ use crate::{
 
 #[derive(Clone, Default, Debug)]
 pub struct Renderer {
-    feedback_event_buffer: VecDeque<(GameTime, FeedbackEvent)>,
+    feedback_event_buffer: VecDeque<(GameTime, Feedback)>,
 }
 
 impl GameScreenRenderer for Renderer {
@@ -26,7 +26,7 @@ impl GameScreenRenderer for Renderer {
         app: &mut App<T>,
         game: &mut Game,
         _action_stats: &mut GameRunningStats,
-        new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        new_feedback_events: FeedbackEvents,
         _screen_resized: bool,
     ) -> io::Result<()>
     where
@@ -64,6 +64,7 @@ impl GameScreenRenderer for Renderer {
                             5 => "TT",
                             6 => "LL",
                             7 => "JJ",
+                            255 => "WW",
                             t => unimplemented!("formatting unknown tile id {t}"),
                         })
                     })
@@ -85,7 +86,7 @@ impl GameScreenRenderer for Renderer {
         let mut feed_evt_msgs = Vec::new();
         for (_, feedback_event) in self.feedback_event_buffer.iter() {
             feed_evt_msgs.push(match feedback_event {
-                FeedbackEvent::Accolade {
+                Feedback::Accolade {
                     score_bonus,
                     shape,
                     spin,
@@ -122,10 +123,10 @@ impl GameScreenRenderer for Renderer {
                     strs.push(format!("+{score_bonus}"));
                     strs.join(" ")
                 }
-                FeedbackEvent::PieceLocked(_) => continue,
-                FeedbackEvent::LineClears(..) => continue,
-                FeedbackEvent::HardDrop(_, _) => continue,
-                FeedbackEvent::Debug(s) => s.clone(),
+                Feedback::PieceLocked(_) => continue,
+                Feedback::LineClears(..) => continue,
+                Feedback::HardDrop(_, _) => continue,
+                Feedback::Message(s) => s.clone(),
             });
         }
         for str in feed_evt_msgs.iter().take(16) {

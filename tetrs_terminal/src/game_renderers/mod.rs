@@ -4,7 +4,7 @@ pub mod naive;
 
 use std::io::{self, Write};
 
-use tetrs_engine::{FeedbackEvent, Game, GameTime};
+use tetrs_engine::{FeedbackEvents, Game};
 
 use crate::terminal_tetrs::{App, GameRunningStats};
 
@@ -14,7 +14,7 @@ pub trait GameScreenRenderer {
         app: &mut App<T>,
         game: &mut Game,
         action_stats: &mut GameRunningStats,
-        new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        new_feedback_events: FeedbackEvents,
         screen_resized: bool,
     ) -> io::Result<()>
     where

@@ -21,8 +21,10 @@ pub type Board = Vec<Line>;
 pub type Coord = (usize, usize);
 pub type Offset = (isize, isize);
 pub type GameTime = Duration;
-pub type FnGameModify = Box<dyn FnMut(&mut GameConfig, &mut GameState)>;
-type EventMap = HashMap<Event, GameTime>;
+pub type FeedbackEvents = Vec<(GameTime, Feedback)>;
+pub type FnGameModify =
+    Box<dyn FnMut(Option<InternalEvent>, &mut GameConfig, &mut GameState, &mut FeedbackEvents)>;
+type EventMap = HashMap<InternalEvent, GameTime>;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -97,7 +99,7 @@ pub struct LockingData {
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Event {
+pub enum InternalEvent {
     LineClear,
     Spawn,
     Lock,
@@ -115,6 +117,7 @@ pub enum Event {
 pub enum GameOver {
     LockOut,
     BlockOut,
+    Fail,
 }
 
 #[derive(PartialEq, PartialOrd, Clone, Debug)]
@@ -163,7 +166,7 @@ pub struct Game {
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum FeedbackEvent {
+pub enum Feedback {
     PieceLocked(ActivePiece),
     LineClears(Vec<usize>, Duration),
     HardDrop(ActivePiece, ActivePiece),
@@ -176,7 +179,7 @@ pub enum FeedbackEvent {
         combo: u32,
         opportunity: u32,
     },
-    Debug(String),
+    Message(String),
 }
 
 impl Orientation {
@@ -514,7 +517,7 @@ impl Game {
         let state = GameState {
             game_time: Duration::ZERO,
             finished: None,
-            events: HashMap::from([(Event::Spawn, Duration::ZERO)]),
+            events: HashMap::from([(InternalEvent::Spawn, Duration::ZERO)]),
             buttons_pressed: Default::default(),
             board: std::iter::repeat(Line::default())
                 .take(Self::HEIGHT)
@@ -564,7 +567,7 @@ impl Game {
         &mut self,
         mut new_button_state: Option<ButtonsPressed>,
         update_time: GameTime,
-    ) -> Result<Vec<(GameTime, FeedbackEvent)>, bool> {
+    ) -> Result<FeedbackEvents, bool> {
         // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
         let mut feedback_events = Vec::new();
         // Handle game over: return immediately.
@@ -583,6 +586,15 @@ impl Game {
                 .iter()
                 .min_by_key(|(&event, &event_time)| (event_time, event))
                 .unwrap();
+            // TODO: Hacky modifier.
+            if let Some(modifier) = self.modifier.as_mut() {
+                modifier(
+                    Some(event),
+                    &mut self.config,
+                    &mut self.state,
+                    &mut feedback_events,
+                );
+            }
             // Next event within requested update time, handle event first.
             if event_time <= update_time {
                 // Extract (remove) event and handle it.
@@ -637,6 +649,15 @@ impl Game {
                     break 'work_through_events;
                 }
             }
+            // TODO: Hacky modifier.
+            if let Some(modifier) = self.modifier.as_mut() {
+                modifier(
+                    None,
+                    &mut self.config,
+                    &mut self.state,
+                    &mut feedback_events,
+                );
+            }
         }
         Ok(feedback_events)
     }
@@ -673,14 +694,14 @@ impl Game {
         */
         // No buttons pressed -> one button pressed, add initial move.
         if (!mL0 && !mR0) && (mL1 != mR1) {
-            events.insert(Event::MoveSlow, update_time);
+            events.insert(InternalEvent::MoveSlow, update_time);
         // One/Two buttons pressed -> different/one button pressed, (re-)add fast repeat move.
         } else if (mL0 && (!mL1 && mR1)) || (mR0 && (mL1 && !mR1)) {
-            events.remove(&Event::MoveFast);
-            events.insert(Event::MoveFast, update_time);
+            events.remove(&InternalEvent::MoveFast);
+            events.insert(InternalEvent::MoveFast, update_time);
         // Single button pressed -> both (un)pressed, remove future moves.
         } else if (mL0 != mR0) && (mL1 == mR1) {
-            events.remove(&Event::MoveFast);
+            events.remove(&InternalEvent::MoveFast);
         }
         /*
         Table:                       Karnaugh map:
@@ -706,38 +727,36 @@ impl Game {
         */
         // Either a 180 rotation, or a single L/R rotation button was pressed.
         if (!rA0 && rA1) || (((!rR0 && rR1) || (!rL0 && rL1)) && (rL0 || rR0 || !rR1 || !rL1)) {
-            events.insert(Event::Rotate, update_time);
+            events.insert(InternalEvent::Rotate, update_time);
         }
         // Soft drop button pressed.
         if !dS0 && dS1 {
-            events.insert(Event::SoftDrop, update_time);
+            events.insert(InternalEvent::SoftDrop, update_time);
         }
         // Hard drop button pressed.
         if !dH0 && dH1 {
-            events.insert(Event::HardDrop, update_time);
+            events.insert(InternalEvent::HardDrop, update_time);
         }
     }
 
     fn handle_event(
         &mut self,
-        event: Event,
+        event: InternalEvent,
         event_time: GameTime,
-    ) -> Result<Vec<(GameTime, FeedbackEvent)>, GameOver> {
+    ) -> Result<FeedbackEvents, GameOver> {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
         let prev_piece_data = self.state.active_piece_data;
         let prev_piece = prev_piece_data.unzip().0;
         let next_piece = match event {
             // We generate a new piece above the skyline, and immediately queue a fall event for it.
-            Event::Spawn => {
+            InternalEvent::Spawn => {
                 debug_assert!(
                     prev_piece.is_none(),
                     "spawning new piece while an active piece is still in play"
                 );
-                let n_required_pieces = 1 + self
-                    .config
-                    .preview_count
-                    .saturating_sub(self.state.next_pieces.len());
+                let n_required_pieces =
+                    (1 + self.config.preview_count).saturating_sub(self.state.next_pieces.len());
                 self.state.next_pieces.extend(
                     self.config
                         .tetromino_generator
@@ -754,20 +773,21 @@ impl Game {
                 if !next_piece.fits(&self.state.board) {
                     return Err(GameOver::BlockOut);
                 }
-                self.state.pieces_played[tetromino] += 1;
-                self.state.events.insert(Event::Fall, event_time);
+                self.state.events.insert(InternalEvent::Fall, event_time);
                 if self.state.buttons_pressed[Button::MoveLeft]
                     || self.state.buttons_pressed[Button::MoveRight]
                 {
-                    self.state.events.insert(Event::MoveFast, event_time);
+                    self.state
+                        .events
+                        .insert(InternalEvent::MoveFast, event_time);
                 }
                 Some(next_piece)
             }
-            Event::Rotate => {
+            InternalEvent::Rotate => {
                 let prev_piece = prev_piece.expect("rotating none active piece");
                 // Special 20G fall immediately after.
                 if self.state.level >= Self::LEVEL_20G {
-                    self.state.events.insert(Event::Fall, event_time);
+                    self.state.events.insert(InternalEvent::Fall, event_time);
                 }
                 let mut rotation = 0;
                 if self.state.buttons_pressed[Button::RotateLeft] {
@@ -784,28 +804,28 @@ impl Game {
                     .rotate(&prev_piece, &self.state.board, rotation)
                     .or(Some(prev_piece))
             }
-            Event::MoveSlow | Event::MoveFast => {
+            InternalEvent::MoveSlow | InternalEvent::MoveFast => {
                 // Handle move attempt and auto repeat move.
                 let prev_piece = prev_piece.expect("moving none active piece");
                 // Special 20G fall immediately after.
                 if self.state.level >= Self::LEVEL_20G {
-                    self.state.events.insert(Event::Fall, event_time);
+                    self.state.events.insert(InternalEvent::Fall, event_time);
                 }
-                let move_delay = if event == Event::MoveSlow {
+                let move_delay = if event == InternalEvent::MoveSlow {
                     self.config.delayed_auto_shift
                 } else {
                     self.config.auto_repeat_rate
                 };
                 self.state
                     .events
-                    .insert(Event::MoveFast, event_time + move_delay);
+                    .insert(InternalEvent::MoveFast, event_time + move_delay);
                 #[rustfmt::skip]
                 let dx = if self.state.buttons_pressed[Button::MoveLeft] { -1 } else { 1 };
                 prev_piece
                     .fits_at(&self.state.board, (dx, 0))
                     .or(Some(prev_piece))
             }
-            Event::Fall | Event::SoftDrop => {
+            InternalEvent::Fall | InternalEvent::SoftDrop => {
                 let prev_piece = prev_piece.expect("falling/softdropping none active piece");
                 if self.state.level >= Self::LEVEL_20G {
                     Some(prev_piece.well_piece(&self.state.board))
@@ -821,40 +841,38 @@ impl Game {
                     if let Some(dropped_piece) = prev_piece.fits_at(&self.state.board, (0, -1)) {
                         self.state
                             .events
-                            .insert(Event::Fall, event_time + drop_delay);
+                            .insert(InternalEvent::Fall, event_time + drop_delay);
                         Some(dropped_piece)
                     // Piece hit ground but SoftDrop was pressed.
-                    } else if event == Event::SoftDrop {
-                        self.state.events.insert(Event::Lock, event_time);
+                    } else if event == InternalEvent::SoftDrop {
+                        self.state.events.insert(InternalEvent::Lock, event_time);
                         Some(prev_piece)
                     // Piece hit ground and tried to drop naturally: don't do anything but try falling again later.
                     } else {
                         // NOTE: This could be changed if a reason for it appears.
                         self.state
                             .events
-                            .insert(Event::Fall, event_time + drop_delay);
+                            .insert(InternalEvent::Fall, event_time + drop_delay);
                         Some(prev_piece)
                     }
                 }
             }
-            Event::HardDrop => {
+            InternalEvent::HardDrop => {
                 let prev_piece = prev_piece.expect("harddropping none active piece");
                 // Move piece all the way down.
                 let dropped_piece = prev_piece.well_piece(&self.state.board);
-                feedback_events.push((
-                    event_time,
-                    FeedbackEvent::HardDrop(prev_piece, dropped_piece),
-                ));
-                self.state
-                    .events
-                    .insert(Event::LockTimer, event_time + self.config.hard_drop_delay);
+                feedback_events.push((event_time, Feedback::HardDrop(prev_piece, dropped_piece)));
+                self.state.events.insert(
+                    InternalEvent::LockTimer,
+                    event_time + self.config.hard_drop_delay,
+                );
                 Some(dropped_piece)
             }
-            Event::LockTimer => {
-                self.state.events.insert(Event::Lock, event_time);
+            InternalEvent::LockTimer => {
+                self.state.events.insert(InternalEvent::Lock, event_time);
                 prev_piece
             }
-            Event::Lock => {
+            InternalEvent::Lock => {
                 let prev_piece = prev_piece.expect("locking none active piece");
                 // Attempt to lock active piece fully above skyline - Game over.
                 if prev_piece
@@ -864,6 +882,7 @@ impl Game {
                 {
                     return Err(GameOver::LockOut);
                 }
+                self.state.pieces_played[prev_piece.shape] += 1;
                 // Pre-save whether piece was spun into lock position.
                 let spin = prev_piece.fits_at(&self.state.board, (0, 1)).is_none();
                 // Locking.
@@ -907,7 +926,7 @@ impl Game {
                         * if perfect_clear { 10 } else { 1 }
                         * self.state.consecutive_line_clears;
                     self.state.score += score_bonus;
-                    let yippie = FeedbackEvent::Accolade {
+                    let yippie = Feedback::Accolade {
                         score_bonus,
                         shape: prev_piece.shape,
                         spin,
@@ -919,7 +938,7 @@ impl Game {
                     feedback_events.push((event_time, yippie));
                     feedback_events.push((
                         event_time,
-                        FeedbackEvent::LineClears(lines_cleared, self.config.line_clear_delay),
+                        Feedback::LineClears(lines_cleared, self.config.line_clear_delay),
                     ));
                 } else {
                     self.state.consecutive_line_clears = 0;
@@ -927,18 +946,20 @@ impl Game {
                 // Clear all events and only put in line clear / appearance delay.
                 self.state.events.clear();
                 if n_lines_cleared > 0 {
-                    self.state
-                        .events
-                        .insert(Event::LineClear, event_time + self.config.line_clear_delay);
+                    self.state.events.insert(
+                        InternalEvent::LineClear,
+                        event_time + self.config.line_clear_delay,
+                    );
                 } else {
-                    self.state
-                        .events
-                        .insert(Event::Spawn, event_time + self.config.appearance_delay);
+                    self.state.events.insert(
+                        InternalEvent::Spawn,
+                        event_time + self.config.appearance_delay,
+                    );
                 }
-                feedback_events.push((event_time, FeedbackEvent::PieceLocked(prev_piece)));
+                feedback_events.push((event_time, Feedback::PieceLocked(prev_piece)));
                 None
             }
-            Event::LineClear => {
+            InternalEvent::LineClear => {
                 for y in (0..Self::HEIGHT).rev() {
                     // Full line: move it to the cleared lines storage and push an empty line to the board.
                     if self.state.board[y].iter().all(|mino| mino.is_some()) {
@@ -952,9 +973,10 @@ impl Game {
                 {
                     self.state.level = self.state.level.saturating_add(1);
                 }
-                self.state
-                    .events
-                    .insert(Event::Spawn, event_time + self.config.appearance_delay);
+                self.state.events.insert(
+                    InternalEvent::Spawn,
+                    event_time + self.config.appearance_delay,
+                );
                 None
             }
         };
@@ -970,16 +992,13 @@ impl Game {
                 ),
             )
         });
-        if let Some(modifier) = self.modifier.as_mut() {
-            modifier(&mut self.config, &mut self.state);
-        }
         Ok(feedback_events)
     }
 
     // TODO: THIS is, by far, the ugliest part of this entire program. For the love of what's good, I hope this code can someday be surgically excised and drop-in replaced with elegant code.
     fn calculate_locking_data(
         &mut self,
-        event: Event,
+        event: InternalEvent,
         event_time: GameTime,
         prev_piece_data: Option<(ActivePiece, LockingData)>,
         next_piece: ActivePiece,
@@ -1005,7 +1024,7 @@ impl Game {
             },
             // [2] Active piece lifted off the ground.
             (Some((_prev_piece, prev_locking_data)), false) if prev_locking_data.touches_ground => {
-                self.state.events.remove(&Event::LockTimer);
+                self.state.events.remove(&InternalEvent::LockTimer);
                 LockingData {
                     touches_ground: false,
                     last_liftoff: Some(event_time),
@@ -1087,8 +1106,8 @@ impl Game {
                     .map(|(prev_piece, _)| prev_piece != next_piece)
                     .unwrap_or(false);
                 #[rustfmt::skip]
-                let move_rotate = matches!(event, Event::Rotate | Event::MoveSlow | Event::MoveFast);
-                if !self.state.events.contains_key(&Event::LockTimer)
+                let move_rotate = matches!(event, InternalEvent::Rotate | InternalEvent::MoveSlow | InternalEvent::MoveFast);
+                if !self.state.events.contains_key(&InternalEvent::LockTimer)
                     || (repositioned && move_rotate)
                 {
                     // SAFETY: We know this must be `Some` in this case.
@@ -1100,7 +1119,7 @@ impl Game {
                     let lock_timer = std::cmp::min(self.lock_delay(), remaining_ground_time);
                     self.state
                         .events
-                        .insert(Event::LockTimer, event_time + lock_timer);
+                        .insert(InternalEvent::LockTimer, event_time + lock_timer);
                 }
                 next_locking_data
             }

@@ -12,8 +12,8 @@ use crossterm::{
     terminal, QueueableCommand,
 };
 use tetrs_engine::{
-    Button, Coord, FeedbackEvent, Game, GameConfig, GameState, GameTime, Orientation, Stat,
-    Tetromino, TileTypeID,
+    Button, Coord, Feedback, FeedbackEvents, Game, GameConfig, GameState, GameTime, Orientation,
+    Stat, Tetromino, TileTypeID,
 };
 
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
 
 #[derive(Clone, Default, Debug)]
 pub struct Renderer {
-    visual_events: Vec<(GameTime, FeedbackEvent, bool)>,
+    visual_events: Vec<(GameTime, Feedback, bool)>,
     messages: BinaryHeap<(GameTime, String)>,
     hard_drop_tiles: Vec<(GameTime, Coord, usize, TileTypeID, bool)>,
 }
@@ -35,7 +35,7 @@ impl GameScreenRenderer for Renderer {
         app: &mut App<T>,
         game: &mut Game,
         action_stats: &mut GameRunningStats,
-        new_feedback_events: Vec<(GameTime, FeedbackEvent)>,
+        new_feedback_events: FeedbackEvents,
         clean_screen: bool,
     ) -> io::Result<()>
     where
@@ -219,6 +219,11 @@ impl GameScreenRenderer for Renderer {
                 g: 101,
                 b: 189,
             },
+            255 => Color::Rgb {
+                r: 127,
+                g: 127,
+                b: 127,
+            },
             t => unimplemented!("formatting unknown tile id {t}"),
         };
         let board_move_to = |(x, y): Coord| {
@@ -303,7 +308,7 @@ impl GameScreenRenderer for Renderer {
         for (event_time, event, relevant) in self.visual_events.iter_mut().rev() {
             let elapsed = game_time.saturating_sub(*event_time);
             match event {
-                FeedbackEvent::PieceLocked(piece) => {
+                Feedback::PieceLocked(piece) => {
                     let Some(tile) = [
                         (50, "██"),
                         (75, "▓▓"),
@@ -325,7 +330,7 @@ impl GameScreenRenderer for Renderer {
                         }
                     }
                 }
-                FeedbackEvent::LineClears(lines_cleared, line_clear_delay) => {
+                Feedback::LineClears(lines_cleared, line_clear_delay) => {
                     if line_clear_delay.is_zero() {
                         *relevant = false;
                         continue;
@@ -361,7 +366,7 @@ impl GameScreenRenderer for Renderer {
                             ))?;
                     }
                 }
-                FeedbackEvent::HardDrop(_top_piece, bottom_piece) => {
+                Feedback::HardDrop(_top_piece, bottom_piece) => {
                     for ((x_tile, y_tile), tile_type_id) in bottom_piece.tiles() {
                         for y in y_tile..Game::SKYLINE {
                             self.hard_drop_tiles.push((
@@ -375,7 +380,7 @@ impl GameScreenRenderer for Renderer {
                     }
                     *relevant = false;
                 }
-                FeedbackEvent::Accolade {
+                Feedback::Accolade {
                     score_bonus,
                     shape,
                     spin,
@@ -417,7 +422,7 @@ impl GameScreenRenderer for Renderer {
                     self.messages.push((*event_time, strs.join(" ")));
                     *relevant = false;
                 }
-                FeedbackEvent::Debug(msg) => {
+                Feedback::Message(msg) => {
                     self.messages.push((*event_time, msg.clone()));
                     *relevant = false;
                 }
