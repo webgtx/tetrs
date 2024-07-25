@@ -11,6 +11,7 @@ use tetrs_engine::{
 
 
 pub fn make_game() -> Game {
+    const SPEED_LEVEL: NonZeroU32 = NonZeroU32::MIN.saturating_add(1);
     let mut init = false;
     let mut puzzle_num = 0;
     let mut puzzle_piece_stamp = 0;
@@ -87,14 +88,14 @@ pub fn make_game() -> Game {
         }
         // Hacky way to show the puzzle level.
         if upcoming_event.is_some() {
-            state.level = NonZeroU32::MIN;
+            state.level = SPEED_LEVEL;
         } else {
             state.level = NonZeroU32::try_from(puzzle_num).unwrap();
         }
     };
     let mut game = Game::with_gamemode(Gamemode::custom(
         "Puzzle".to_string(),
-        NonZeroU32::MIN,
+        SPEED_LEVEL,
         false,
         Some(Stat::Lines(total_lines)),
         Stat::Time(Duration::ZERO),
