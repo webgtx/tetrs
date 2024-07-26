@@ -92,8 +92,10 @@ enum MenuUpdate {
     Push(Menu),
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[serde_with::serde_as]
+#[derive(PartialEq, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
+    #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     pub keybinds: HashMap<KeyCode, Button>,
     pub game_fps: f64,
     pub show_fps: bool,
@@ -106,14 +108,19 @@ pub struct App<T: Write> {
     pub term: T,
     pub settings: Settings,
     custom_mode: Gamemode,
-    kitty_enabled: bool,
     games_finished: Vec<GameFinishedStats>,
+    kitty_enabled: bool,
 }
 
 impl<T: Write> Drop for App<T> {
     fn drop(&mut self) {
         // TODO: Handle errors?
-        let _ = Self::save_games(&self.games_finished);
+        // let _ = self.save_local();
+        if let Err(_e) = self.save_local() {
+            // TODO: Make this debuggable.
+            //eprintln!("Could not save settings this time: {e} ");
+            //std::thread::sleep(Duration::from_secs(4));
+        }
         // Console epilogue: de-initialization.
         if self.kitty_enabled {
             let _ = self.term.execute(event::PopKeyboardEnhancementFlags);
@@ -128,7 +135,7 @@ impl<T: Write> Drop for App<T> {
 impl<T: Write> App<T> {
     pub const W_MAIN: u16 = 80;
     pub const H_MAIN: u16 = 24;
-    pub const SAVE_FILE: &'static str = "./tetrs_terminal_scores.json";
+    pub const SAVE_FILE: &'static str = "./tetrs_terminal.json";
 
     pub fn new(mut terminal: T, fps: u32) -> Self {
         // Console prologue: Initializion.
@@ -166,18 +173,24 @@ impl<T: Write> App<T> {
             None,
             Stat::Pieces(0),
         );
-        let games_finished = Self::load_games().unwrap_or(Vec::new());
-        Self {
+        let mut app = Self {
             term: terminal,
             settings,
             kitty_enabled,
             custom_mode,
-            games_finished,
+            games_finished: vec![],
+        };
+        if let Err(_e) = app.load_local() {
+            // TODO: Make this debuggable.
+            //eprintln!("Could not loading settings: {e}");
+            //std::thread::sleep(Duration::from_secs(5));
         }
+        app
     }
 
-    fn save_games(games_finished: &[GameFinishedStats]) -> io::Result<()> {
-        let relevant_games_finished = games_finished
+    fn save_local(&mut self) -> io::Result<()> {
+        self.games_finished = self
+            .games_finished
             .iter()
             .filter(|game_finished_stats| {
                 game_finished_stats.was_successful()
@@ -189,22 +202,22 @@ impl<T: Write> App<T> {
                         Stat::Score(pts) => pts > 0,
                     }
             })
+            .cloned()
             .collect::<Vec<_>>();
-        if !relevant_games_finished.is_empty() {
-            let save_str = serde_json::to_string(&relevant_games_finished)?;
-            let mut file = File::create(Self::SAVE_FILE)?;
-            // TODO: Handle error?
-            let _ = file.write(save_str.as_bytes())?;
-        }
+        let save_state = (&self.settings, &self.custom_mode, &self.games_finished);
+        let save_str = serde_json::to_string(&save_state)?;
+        let mut file = File::create(Self::SAVE_FILE)?;
+        // TODO: Handle error?
+        let _ = file.write(save_str.as_bytes())?;
         Ok(())
     }
 
-    fn load_games() -> io::Result<Vec<GameFinishedStats>> {
+    fn load_local(&mut self) -> io::Result<()> {
         let mut file = File::open(Self::SAVE_FILE)?;
         let mut save_str = String::new();
         file.read_to_string(&mut save_str)?;
-        let games_finished = serde_json::from_str(&save_str)?;
-        Ok(games_finished)
+        (self.settings, self.custom_mode, self.games_finished) = serde_json::from_str(&save_str)?;
+        Ok(())
     }
 
     pub fn run(&mut self) -> io::Result<String> {
