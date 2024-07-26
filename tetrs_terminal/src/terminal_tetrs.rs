@@ -1246,6 +1246,7 @@ impl<T: Write> App<T> {
                     5 => {
                         self.settings.no_soft_drop_lock = !self.settings.no_soft_drop_lock;
                     }
+                    6 => {}
                     _ => unreachable!(),
                 },
                 Event::Key(KeyEvent {
@@ -1272,6 +1273,7 @@ impl<T: Write> App<T> {
                     5 => {
                         self.settings.no_soft_drop_lock = !self.settings.no_soft_drop_lock;
                     }
+                    6 => {}
                     _ => unreachable!(),
                 },
                 // Other event: don't care.
