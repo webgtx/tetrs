@@ -66,13 +66,14 @@
   - Change start level, toggle level increment, set game limit *(Time, Score, Pieces, Lines, Level, or None)*.
 
 **Gameplay**
-- Familiar game experience with moving, rotating, hard- and softdropping *tetrominos*.
-- Colored pieces (guideline).
-- Next piece preview (N=1).
+- Familiar game experience of moving, rotating, hard-/softdropping *tetrominos* with the aim to clear lines.
+- Colorful pieces (following guideline).
+- Next piece preview.
 - Ghost piece.
-- Animations for: Hard drops, Line clears and Piece locking.
-- Current game stats: Level, Score, Lines, Time, Pieces generated.
-- For technical details see [Features of the Tetrs Engine](#features-of-the-tetrs-engine).
+- Animations: Hard drop, Line clears and Piece locking.
+- Game stats: Level, Score, Lines, Time, Pieces generated.
+
+For more technical details see [Features of the Tetrs Engine](#features-of-the-tetrs-engine).
   
 **Scoreboard**
 - (stored to / loaded from local *tetrs_terminal_scores.json* if possible).
@@ -139,9 +140,9 @@ tetrs_engine = { git = "https://github.com/Strophox/tetrs.git" }
 
 <summary> Game Configuration Aspects </summary>
 
-- Gamemodes: Marathon, Sprint, Ultra, Master; Custom, given a playing limit, start lvl, whether to increment level.
+- Gamemodes: Marathon, Sprint, Ultra, Master; Custom (game limit; start lvl; whether to increment level).
 - Rotation Systems: *Ocular Rotation System*, *Classic Rotation System*, *Super Rotation System*.
-- Tetromino Generators: *Bag*, *Recency-based*, *Uniformly random*.
+- Tetromino Generators: *Recency-based*, *Bag*, *Uniformly random*.
 - Piece Preview (default N = 1)
 - Delayed Auto Shift (default DAS = 200ms)
 - Auto Repeat Rate (default ARR = 50ms)
@@ -224,9 +225,9 @@ Also see documentation (`cargo doc --open`).
 
 ## Project Highlights
 
-While the [2009 Tetris Guideline](https://tetris.wiki/Tetris_Guideline) served as good inspiration, I ended up having a lot of fun researching the variety of details of the game myself (thank you [Tetris Wiki](https://tetris.wiki/) and [HardDrop](https://harddrop.com/wiki)!) and also by asking people (thank you GrBtAce and KonSola5!).
+While the [2009 Tetris Guideline](https://tetris.wiki/Tetris_Guideline) served as good inspiration, I ended up doing a lot of amateur research into a variety of game details (thank you [Tetris Wiki](https://tetris.wiki/) and [HardDrop](https://harddrop.com/wiki)!) and also asking people about the game (thank you GrBtAce and KonSola5!).
 
-In the following I detail various interesting concepts I tackled on my way to completing this game.
+In the following I detail various interesting concepts I tackled on my way to bringing this project to this point.
 
 
 ### Tetromino Generation
