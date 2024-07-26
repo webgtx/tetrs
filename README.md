@@ -126,7 +126,7 @@ Basic interaction with the engine could look like the following:
 
 ```rust
 // Starting a game.
-let game = tetrs_engine::Game::with_gamemode(gamemode, time_started);
+let game = tetrs_engine::Game::with_gamemode(Gamemode::marathon());
 
 // Application loop.
 loop {
@@ -538,8 +538,8 @@ This project allowed me to have first proper learning experience with programmin
 
 Gamedev-wise I can mention mostly learning about the [modern](https://gafferongames.com/post/fix_your_timestep/) [game](http://gameprogrammingpatterns.com/game-loop.html) [loop](https://dewitters.com/dewitters-gameloop/) and finding the proper abstraction for `Game::update` (allow arbitrary-time user input, make updates decoupled from framerate).
 
-Frontend-wise I kind of winged it with the trusty [Crossterm](https://crates.io/crates/crossterm) for cross-platform terminal manipulation, though I may as well have used [Ratatui](https://crates.io/crates/ratatui/) after all.
-(Maybe some other time!)
+Frontend-wise I may have used [Ratatui](https://crates.io/crates/ratatui/), but I decided to just do some basic menus myself using the trusty [Crossterm](https://crates.io/crates/crossterm) for cross-platform terminal manipulation.
+Next time I'll use a TUI crate so as to sleep more peacefully at night not having to think about the ~horrible ad-hoc code I wrote (please don't judge :c )~
 
 On the Rust side of things I learned about;
 - Some [coding](https://docs.kernel.org/rust/coding-guidelines.html) [style](https://doc.rust-lang.org/nightly/style-guide/) [guidelines](https://github.com/rust-lang/rust-analyzer/blob/master/docs/dev/style.md#getters--setters) & `cargo fmt` (~`#[rustfmt::skip]`~),
