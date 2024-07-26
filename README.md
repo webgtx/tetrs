@@ -208,18 +208,69 @@ The following detail various big and small concepts I tackled on my way to compl
 
 ### Ocular Rotation System
 
-TODO <!--https://youtu.be/6YhkkyXydNI?si=jbVwfNtfl5yFh9Gk&t=674-->
+> "[tetris has a great rotation system and is not flawed at all](https://www.youtube.com/watch?v=_qaEknA81Iw)"
+
+\— **[said no one ever, not even the creator himself](https://youtu.be/6YhkkyXydNI?si=jbVwfNtfl5yFh9Gk&t=674).**
+
+To be fair, donsidering the huge franchise and range of players coming from all sorts of niches and previous game version the *"Super Rotation System"* [gets its job done](https://www.youtube.com/watch?v=dgt1kWq2_7c)™.
+
+But this doesn't change the fact that it was *the* thing I thought about revamping 'better' when starting this project:
+
+- The system is **not** symmetric:
+  - Symmetric pieces can look exactly the same in different rotation states, **[but have different behaviour](https://blog.battlefy.com/how-accidental-complexity-harms-the-tetris-community-93311461b2af)**.
+  - Doing rotation, then Mirroring board and piece **≠** Mirroring board and piece, then Doing mirrored rotation.
+- 'Piece elevators' exist (\*though I don't know how to disprove the existence of such in any given rotation system with kicks.)
+- It's an [advanced system](https://harddrop.com/wiki/SRS) with things like different rotation points for different purposes, yet it re-uses the *exact same kicks* for 5 out of the 7 pieces, even though they have completely different symmetries.
+- Not a hot take, but some rotations are just *weird* (to be chosen over other possibilities).
+
+My criteria for a good rotation system are:
+
+1. Symmetric if the board and piece were mirrored.
+2. Equal-looking states must have the same behaviour.
+3. Don't overdo it with crazy kicks
+4. But still allow fun things
+
+The result of this was the *Ocular Rotation System*, which I made by... looking at each piece orientation and drawing the most visually sensible positions for a piece to land in after a rotation. By overlapping all the kicks that are test in sequential order, one gets a compact heatmap of where the piece will land, going from hottest color (bright yellow) to coldest (dark purple).
+
+TODO: Graph ORS.
+
+TODO: Graph SRS.
+
+
+### Tetromino Generation
+
+Tetromino generation is at the heart of the game.
+
+A trivial generator chooses tetrominos *uniformly at random*, and this actually already works decent.
+But players tend to get frustrated when they don't get the pieces they need for a long time: there's even a name for not getting an `I`-piece for a long time: *Droughts*.
+
+The modern *bag-based generation system* is standard and simply takes all 7 pieces once, gives them out in random order, repeat.
+It's quite nice knowing an `I` piece will come after 12 pieces, every time. You can even start strategizing quite deterministically by counting where one bag ends and the next starts.
+
+But to me it takes the fun out of the randomness, *somehow*; Maybe we can take uniform random generation and just tweak it a little so it doesn't have droughts anymore?
+
+Presenting *recency-based generation system*: It remembers the last time it generated each piece and chooses the next piece randomly, but weighted by last seen so it more likely chooses pieces not seen in a while.
+
+This preserves "possibly complete randomness" (*any* piece may be generated at any time), but *precisely* mitigating droughts.
+
+One could make a point that it's even more handy than bag in *certain* ways: The player can have a mental image of the _order_ in which the next or next few pieces might appear. In bag, with each new refill the order within *is* completely random (although I'm aware this does not matter for games that have 6 piece preview and standard 7-bag).
 
 
 ### Piece Locking
 
 The mechanic of locking a piece tends to be more complicated than it sounds.
-My criteria for a good system are:
+My criteria for a good locking system are:
 
 1. Keeps the player from stalling / forces the player to make a choice eventually.
 2. Give the player enough flexibility to manipulate the piece even if it's on the ground.
 3. Force the player to react _faster_ on higher levels, as speed is supposed to increase.
-4. Implement all these limitations as naturally as possible.
+4. Implement all these limitations as naturally and/or simply as possible.
+
+So I started researching and thinking about the locking system to use.
+
+<details>
+
+<summary> Piece Locking ... </summary>
 
 *Classic lock down* is simple, but if one decreases the lock timer (3.) then it becomes insanely difficult for the player to actually have enough time to do adjustments (2.).
 
@@ -227,11 +278,11 @@ My criteria for a good system are:
 
 <summary> Classic Lock Down </summary>
 
-- If the piece touches a surface
-  - start a lock timer of 500ms (\**var with lvl*).
-  - record the lowest y coordinate the piece has reached.
-- If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
-- If the piece falls below the previously lowest recorded y coordinate, reset lock timer.
+> - If the piece touches a surface
+>   - start a lock timer of 500ms (\**var with lvl*).
+>   - record the lowest y coordinate the piece has reached.
+> - If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
+> - If the piece falls below the previously lowest recorded y coordinate, reset lock timer.
 
 </details>
 
@@ -242,10 +293,10 @@ It's very simple, but is disqualified due to breaking the make-a-decision-please
 
 <summary> Infinite Lock Down </summary>
 
-- If the piece touches a surface
-  - start a lock timer of 500ms (\**var with lvl*).
-- If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
-- If the piece moves/rotates (change in position), reset lock timer ('move reset').
+> - If the piece touches a surface
+>   - start a lock timer of 500ms (\**var with lvl*).
+> - If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
+> - If the piece moves/rotates (change in position), reset lock timer ('move reset').
 
 </details>
 
@@ -255,18 +306,18 @@ The standard recommended by the guideline is therefore *extended placement lock 
 
 <summary> Extended Placement Lock Down </summary>
 
-- If the piece touches a surface
-  - start a lock timer of 500ms (\**var with lvl*).
-  - start counting the number of moves/rotates the player makes.
-  - record the lowest y coordinate the piece has reached.
-- If the piece moves/rotates (change in position), reset lock timer ('move reset').
-- If the number of moves reaches 15, do not reset the lock timer anymore.
-- If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
-- If the piece falls below the previously lowest recorded y coordinate, reset counted number of moves.
+> - If the piece touches a surface
+>   - start a lock timer of 500ms (\**var with lvl*).
+>   - start counting the number of moves/rotates the player makes.
+>   - record the lowest y coordinate the piece has reached.
+> - If the piece moves/rotates (change in position), reset lock timer ('move reset').
+> - If the number of moves reaches 15, do not reset the lock timer anymore.
+> - If the lock timer runs out, lock the piece immediately as soon as it touches the next surface.
+> - If the piece falls below the previously lowest recorded y coordinate, reset counted number of moves.
 
 *(\*This probably misses a few edge cases, but you get the gist.)*
 
-</summary>
+</details>
 
 Yeah.
 
@@ -280,25 +331,23 @@ What if we limit the *total amount of time a piece may touch a surface* (1.) ins
 
 *Let 'ground time' denote the amount of time a piece touches a surface*
 
-- If the piece touches a surface
-  - start a lock timer of 500ms (\**var with lvl*).
-  - start measuring the ground time.
-  - record the lowest y coordinate the piece has reached.
-- If the piece moves/rotates (change in position), reset lock timer ('move reset').
-- If the lock timer runs out *or* the ground time reaches 2.25s, lock the piece immediately as soon as it touches the next surface.
-- If the piece falls below the previously lowest recorded y coordinate, reset the ground time.
+> - If the piece touches a surface
+>   - start a lock timer of 500ms (\**var with lvl*).
+>   - start measuring the ground time.
+>   - record the lowest y coordinate the piece has reached.
+> - If the piece moves/rotates (change in position), reset lock timer ('move reset').
+> - If the lock timer runs out *or* the ground time reaches 2.25s, lock the piece immediately as soon as it touches the next surface.
+> - If the piece falls below the previously lowest recorded y coordinate, reset the ground time.
 
-</summary>
+</details>
 
 Although nice, it may *potentially* be abused by players keeping pieces in the air, only to occasionally touch down to reset the lock timer but hardly count any ground time (though this problem vanishes at high G anyway).
 
 A small fix for this is to check the last time the piece touched the ground, and if it's less than 2×(drop delay) ago, act as if the piece had been touching ground all along. This way the piece is guaranteed to be counted as "continuously on ground" with upward kicks ≤ 2.
 
-In the end, timer-based extended placement lockdown + ground continuity fix is what I used. I have yet to find a nicer system.
+</details>
 
-### Scoring
-
-Coming up with a good score system is tough, and experience and playtesting helps, so the one I come up with probably sucks ("how many points should a 'perfect clear' receive?"). Even so, I went along and experimented, since I liked the idea of [rewarding all spins](https://harddrop.com/wiki/List_of_twists).
+In the end, a timer-based extended placement lockdown (+ ground continuity fix) is what I used. I have yet to find a nicer system.
 
 
 ### Gamemodes
@@ -357,15 +406,28 @@ The real implementation additionally stores the (speed) level to start at, and w
 
 > So how does 'Puzzle Mode' work? - I can tell you how: with a pinch of state modeling jank and some not-so-secret internal state leakage via `Game::set_modifier`.
 
+### Scoring
+
+Coming up with a good score system is tough, and experience and playtesting helps, so the one I come up with probably sucks ("how many points should a 'perfect clear' receive?"). Even so, I went along and experimented, since I liked the idea of [rewarding all spins](https://harddrop.com/wiki/List_of_twists).
+
 ### Controls
 
 Quick research on the 'best' or 'most ergonomic' game keybinds was [inconclusive](https://youtube.com/watch?v=6YhkkyXydNI&t=809). Upon sampling a few dozen on reddit posts it seems a 50/50 split on `←` `→` / `a` `d` or `z` `x` / `←` `→` for **move** / **rotate**. "Choose what feels best for you" some said - they're probably right. *(\*Even so, one should *not* hammer the spacebar for hard drops, the only button guideline suggests.)*
+
+
+### Menu Navigation.
+
+Modeling how the TUI goes between the menus was unclear initially. Luckily, I was able to look at how [Noita](https://noitagame.com/) did its menu navigation and saw that it needn't be a complicated system;
+In essence, the menus form a graph (with menus as nodes and valid transitions as directed edges), and some menus allow one to _go back_ to where one came from last (or not).
+
+TODO: Graph.
+
 
 ### Miscellaneous Author Notes
 
 This project allowed me to have first proper learning experience with programming a larger Rust project, an interactive game (in the console), and the intricacies of the Game mechanics themselves (see [Features of the Tetrs Engine](#features-of-the-tetrs-engine)).
 
-Gamedev-wise I learned about the [modern](https://gafferongames.com/post/fix_your_timestep/) [game](http://gameprogrammingpatterns.com/game-loop.html) [loop](https://dewitters.com/dewitters-gameloop/) and finding the proper abstraction for `Game::update` (allow arbitrary-time user input, make updates decoupled from framerate). I also spent time looking at the menu navigation of [Noita](https://noitagame.com/) to help me come up with my own.
+Gamedev-wise I learned about the [modern](https://gafferongames.com/post/fix_your_timestep/) [game](http://gameprogrammingpatterns.com/game-loop.html) [loop](https://dewitters.com/dewitters-gameloop/) and finding the proper abstraction for `Game::update` (allow arbitrary-time user input, make updates decoupled from framerate).
 
 On the Rust side of things I learned about;
 - Some [coding](https://docs.kernel.org/rust/coding-guidelines.html) [style](https://doc.rust-lang.org/nightly/style-guide/) [guidelines](https://github.com/rust-lang/rust-analyzer/blob/master/docs/dev/style.md#getters--setters) & `cargo fmt` (~`#[rustfmt::skip]`~),
