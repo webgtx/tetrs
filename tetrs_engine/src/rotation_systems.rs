@@ -104,7 +104,7 @@ fn rotate_ocular(piece: &ActivePiece, board: &Board, right_turns: i32) -> Option
                     continue 'calculate_kicks;
                 } else  {
                     break match orientation {
-                        N | S => [( 1,-1), ( 1,-2), ( 1,-3), ( 0,-1), ( 2,-1), ( 1, 1)].iter(),
+                        N | S => [( 1,-1), ( 1,-2), ( 1,-3), ( 0,-1), ( 0,-2), ( 2,-1), ( 2,-2), ( 1, 0), ( 0, 0)].iter(),
                         E | W => [(-2, 1), (-3, 1), (-1, 1), ( 0, 1), (-2, 0), (-3, 0)].iter(),
                     };
                 }
