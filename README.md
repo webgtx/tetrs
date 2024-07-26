@@ -461,7 +461,7 @@ The real implementation additionally stores the (speed) level to start at, and w
 > 
 > </details>
 
-> So how does 'Puzzle Mode' work? - I can tell you how: with a pinch of state modeling jank and some not-so-secret internal state leakage via `Game::set_modifier`.
+> *Wait, so how does 'Puzzle Mode' work?* - I can tell you: with some not-so-secret internal state leakage and a large pinch of state modeling jank via [`Game::set_modifier(...)`](tetrs_terminal/src/puzzle_mode.rs).
 
 
 ### Scoring
@@ -470,6 +470,7 @@ The exact scoring formula is given by the following:
   <details>
   
   <summary>Scoring Details and Formula</summary>
+  
   ```haskell
   score_bonus = 10
               * (lines ^ 2)
@@ -524,9 +525,7 @@ The menus form a graph (with menus as nodes and valid transitions as directed ed
 
 <details>
 
-<summary>
-  Tetrs Terminal Menu Graph
-</summary>
+<summary>Tetrs Terminal Menu Graph (via Graphviz)</summary>
 
 ![tetrs menu graph](Gallery/tetrs_menu-graph.png)
 
