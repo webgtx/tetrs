@@ -283,9 +283,9 @@ impl GameScreenRenderer for Renderer {
                 format!("                       |                    |               ", ),
                 format!("   CONTROLS            |                    |               ", ),
                 format!("   ---------           |                    |               ", ),
-                format!("   Drop    {:<12      }|                    |               ", key_icons_drop),
                 format!("   Move    {:<12      }|                    |               ", key_icons_move),
                 format!("   Rotate  {:<12      }|                    |               ", key_icons_rotate),
+                format!("   Drop    {:<12      }|                    |               ", key_icons_drop),
                 format!("   Pause   {:<9    }  ~#====================#~              ", key_icon_pause),
                 format!("                                                            ", ),
             ]
@@ -310,10 +310,10 @@ impl GameScreenRenderer for Renderer {
                 format!("                       ║                    ║               ", ),
                 format!("   CONTROLS            ║                    ║               ", ),
                 format!("   ────────╴           ║                    ║               ", ),
-                format!("   Drop    {:<12      }║                    ║               ", key_icons_drop),
                 format!("   Move    {:<12      }║                    ║               ", key_icons_move),
                 format!("   Rotate  {:<12      }║                    ║               ", key_icons_rotate),
-                format!("   Pause   {:<9    }░▒▓▛▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▜▓▒░            ", key_icon_pause),
+                format!("   Drop    {:<12      }║                    ║               ", key_icons_drop),
+                format!("   Pause   {:<9    }░▒▓█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█▓▒░            ", key_icon_pause),
                 format!("                                                            ", ),
             ]
         };

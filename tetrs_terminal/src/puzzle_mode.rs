@@ -7,7 +7,7 @@ use tetrs_engine::{
 
 pub fn make_game() -> Game {
     const SPEED_LEVEL: NonZeroU32 = NonZeroU32::MIN.saturating_add(1);
-    const MAX_PUZZLE_ATTEMPTS: usize = 2;
+    const MAX_PUZZLE_ATTEMPTS: usize = 3;
     let mut init = false;
     let mut current_puzzle = 0;
     let mut current_puzzle_attempt = 0;
