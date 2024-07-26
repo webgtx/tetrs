@@ -477,12 +477,12 @@ The exact scoring formula is given by the following:
               * (if spin then 4 else 1)
               * (if perfect then 16 else 1)
               * combo
-              * maximum [1, backToBack * backToBack]
+              * maximum [1, backToBack ^ 2]
     where lines = "number of lines cleared simultaneously"
           spin = "piece could not move up when locking occurred"
           perfect = "board is empty after line clear"
           combo = "number of consecutive pieces where line clear occurred"
-          backToBack = maximum [1, "number of consecutive line clears where spin, perfect or quadruple line clear occurred"]
+          backToBack = "number of consecutive line clears where spin, perfect or quadruple line clear occurred"
   ```
   A table of some bonuses is provided:
   | Score bonus | Action |
