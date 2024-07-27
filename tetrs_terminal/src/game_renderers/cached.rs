@@ -168,7 +168,6 @@ impl GameScreenRenderer for Renderer {
         }
         let GameState {
             time: game_time,
-            event_ticker: _,
             end: _,
             events: _,
             buttons_pressed: _,

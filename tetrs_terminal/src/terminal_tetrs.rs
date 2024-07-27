@@ -951,7 +951,6 @@ impl<T: Write> App<T> {
         } = finished_game_stats;
         let GameState {
             time: game_time,
-            event_ticker: _,
             end: _,
             events: _,
             buttons_pressed: _,

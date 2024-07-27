@@ -27,10 +27,7 @@ pub fn display_tetromino_likelihood_mod(
         pieces_played_strs.sort_by_key(|&t| lg[t]);
         feedback_events.push((
             state.time,
-            Feedback::Message(format!(
-                "{} {}",
-                state.event_ticker,
-                pieces_played_strs
+            Feedback::Message(pieces_played_strs
                     .map(|t| format!(
                         "{t:?}{}{}{}",
                         lg[t],
@@ -39,8 +36,7 @@ pub fn display_tetromino_likelihood_mod(
                         [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"][(lg[t] * lg[t]) as usize % 8]
                     )
                     .to_ascii_lowercase())
-                    .join("")
-            )),
+                    .join("").to_string()),
         ));
         // config.line_clear_delay = Duration::ZERO;
         // config.appearance_delay = Duration::ZERO;

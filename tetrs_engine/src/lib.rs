@@ -125,12 +125,12 @@ pub enum InternalEvent {
     LineClear,
     Spawn,
     Lock,
-    LockTimer,
     HardDrop,
     SoftDrop,
     MoveSlow,
     MoveFast,
     Rotate,
+    LockTimer,
     Fall,
 }
 
@@ -147,7 +147,6 @@ pub enum GameOver {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameState {
     pub time: GameTime,
-    pub event_ticker: u64,
     pub end: Option<Result<(), GameOver>>,
     /// Invariants:
     /// * Until the game has finished there will always be more events: `finished.is_some() || !next_events.is_empty()`.
@@ -479,13 +478,13 @@ impl Default for GameConfig {
             rotation_system: RotationSystem::Ocular,
             tetromino_generator: TetrominoGenerator::recency(),
             preview_count: 1,
-            delayed_auto_shift: Duration::from_millis(200),
-            auto_repeat_rate: Duration::from_millis(50),
+            delayed_auto_shift: Duration::from_millis(167),
+            auto_repeat_rate: Duration::from_millis(33),
             soft_drop_factor: 15.0,
             hard_drop_delay: Duration::from_micros(100),
             ground_time_max: Duration::from_millis(2250),
             line_clear_delay: Duration::from_millis(200),
-            appearance_delay: Duration::from_millis(100),
+            appearance_delay: Duration::from_millis(50),
             no_soft_drop_lock: false,
         }
     }
@@ -517,7 +516,6 @@ impl Game {
         let mut rng = rand::thread_rng();
         let state = GameState {
             time: Duration::ZERO,
-            event_ticker: 0,
             end: None,
             events: HashMap::from([(InternalEvent::Spawn, Duration::ZERO)]),
             buttons_pressed: Default::default(),
@@ -783,7 +781,6 @@ impl Game {
     }
 
     fn handle_event(&mut self, event: InternalEvent, event_time: GameTime) -> FeedbackEvents {
-        self.state.event_ticker += 1;
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
         let prev_piece_data = self.state.active_piece_data;
@@ -860,7 +857,8 @@ impl Game {
                     self.config.delayed_auto_shift
                 } else {
                     self.config.auto_repeat_rate
-                };
+                }
+                .min(self.lock_delay().saturating_sub(Duration::from_millis(1)));
                 self.state
                     .events
                     .insert(InternalEvent::MoveFast, event_time + move_delay);
