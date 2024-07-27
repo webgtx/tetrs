@@ -22,7 +22,15 @@ pub type Coord = (usize, usize);
 pub type Offset = (isize, isize);
 pub type GameTime = Duration;
 pub type FeedbackEvents = Vec<(GameTime, Feedback)>;
-pub type FnGameMod = Box<dyn FnMut(&mut GameConfig, &mut GameMode, &mut GameState, &mut FeedbackEvents, Option<InternalEvent>)>;
+pub type FnGameMod = Box<
+    dyn FnMut(
+        &mut GameConfig,
+        &mut GameMode,
+        &mut GameState,
+        &mut FeedbackEvents,
+        Option<InternalEvent>,
+    ),
+>;
 type EventMap = HashMap<InternalEvent, GameTime>;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
@@ -155,6 +163,11 @@ pub struct GameState {
     pub score: u32,
     pub consecutive_line_clears: u32,
     pub back_to_back_special_clears: u32,
+}
+
+pub enum GameUpdateError {
+    DurationPassed,
+    GameEnded,
 }
 
 pub struct Game {
@@ -373,7 +386,10 @@ impl GameMode {
             name: String::from("Marathon"),
             start_level: NonZeroU32::MIN,
             increment_level: true,
-            limits: Limits { level: Some((true, Game::LEVEL_20G.saturating_add(1))), ..Default::default() },
+            limits: Limits {
+                level: Some((true, Game::LEVEL_20G.saturating_add(1))),
+                ..Default::default()
+            },
         }
     }
 
@@ -383,7 +399,10 @@ impl GameMode {
             name: String::from("40-Lines"),
             start_level,
             increment_level: false,
-            limits: Limits { lines: Some((true, 40)), ..Default::default() },
+            limits: Limits {
+                lines: Some((true, 40)),
+                ..Default::default()
+            },
         }
     }
 
@@ -393,7 +412,10 @@ impl GameMode {
             name: String::from("Time Trial"),
             start_level,
             increment_level: false,
-            limits: Limits { time: Some((true, Duration::from_secs(3 * 60))), ..Default::default() },
+            limits: Limits {
+                time: Some((true, Duration::from_secs(3 * 60))),
+                ..Default::default()
+            },
         }
     }
 
@@ -403,7 +425,10 @@ impl GameMode {
             name: String::from("Master"),
             start_level: Game::LEVEL_20G,
             increment_level: true,
-            limits: Limits { lines: Some((true, 300)), ..Default::default() },
+            limits: Limits {
+                lines: Some((true, 300)),
+                ..Default::default()
+            },
         }
     }
 
@@ -545,33 +570,62 @@ impl Game {
         &self.state
     }
 
+    /// # Safety
+    ///
+    /// TODO: Documentation of this. Generally speaking, this allows raw access to the `state` and `mode` internals and wrong mods might mangle internals and invariants.
     pub unsafe fn add_modifier(&mut self, game_mod: FnGameMod) {
         self.modifiers.push(game_mod)
     }
 
     fn update_game_end(&mut self) {
-        self.state.end = self.state.end.or_else(||
+        self.state.end = self.state.end.or_else(|| {
             [
-                self.mode.limits.time.and_then(|(win, dur)| (dur <= self.state.game_time).then_some(win)),
-                self.mode.limits.pieces.and_then(|(win, pcs)| (pcs <= self.state.pieces_played.iter().sum()).then_some(win)),
-                self.mode.limits.lines.and_then(|(win, lns)| (lns <= self.state.lines_cleared).then_some(win)),
-                self.mode.limits.level.and_then(|(win, lvl)| (lvl <= self.state.level).then_some(win)),
-                self.mode.limits.score.and_then(|(win, pts)| (pts <= self.state.score).then_some(win)),
-            ].into_iter().find_map(|limit_reached|
-                limit_reached.map(|win|
+                self.mode
+                    .limits
+                    .time
+                    .and_then(|(win, dur)| (dur <= self.state.game_time).then_some(win)),
+                self.mode.limits.pieces.and_then(|(win, pcs)| {
+                    (pcs <= self.state.pieces_played.iter().sum()).then_some(win)
+                }),
+                self.mode
+                    .limits
+                    .lines
+                    .and_then(|(win, lns)| (lns <= self.state.lines_cleared).then_some(win)),
+                self.mode
+                    .limits
+                    .level
+                    .and_then(|(win, lvl)| (lvl <= self.state.level).then_some(win)),
+                self.mode
+                    .limits
+                    .score
+                    .and_then(|(win, pts)| (pts <= self.state.score).then_some(win)),
+            ]
+            .into_iter()
+            .find_map(|limit_reached| {
+                limit_reached.map(|win| {
                     if win {
                         Ok(())
                     } else {
                         Err(GameOver::ModeLimit)
                     }
-                )
-            )
-        );
+                })
+            })
+        });
     }
 
-    fn apply_modifiers(&mut self, feedback_events: &mut Vec<(GameTime, Feedback)>, before_event: Option<InternalEvent>) {
+    fn apply_modifiers(
+        &mut self,
+        feedback_events: &mut Vec<(GameTime, Feedback)>,
+        before_event: Option<InternalEvent>,
+    ) {
         for modify in &mut self.modifiers {
-            modify(&mut self.config, &mut self.mode, &mut self.state, feedback_events, before_event);
+            modify(
+                &mut self.config,
+                &mut self.mode,
+                &mut self.state,
+                feedback_events,
+                before_event,
+            );
         }
     }
 
@@ -579,7 +633,7 @@ impl Game {
         &mut self,
         mut new_button_state: Option<ButtonsPressed>,
         update_time: GameTime,
-    ) -> Result<FeedbackEvents, ()> {
+    ) -> Result<FeedbackEvents, GameUpdateError> {
         /*
         Order:
         - if game already ended, return immediately
@@ -596,12 +650,12 @@ impl Game {
          */
         // Invalid call: return immediately.
         if update_time < self.state.game_time {
-            return Err(());
+            return Err(GameUpdateError::DurationPassed);
         }
         // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
         let mut feedback_events = Vec::new();
         if self.ended() {
-            return Ok(feedback_events);
+            return Err(GameUpdateError::GameEnded);
         };
         // We linearly process all events until we reach the update time.
         'event_simulation: loop {
@@ -626,7 +680,7 @@ impl Game {
                 // Stop simulation early if event or modifier ended game.
                 self.update_game_end();
                 if self.ended() {
-                    break 'event_simulation
+                    break 'event_simulation;
                 }
             // Possibly process user input events now or break out.
             } else {
@@ -645,7 +699,7 @@ impl Game {
                     self.state.buttons_pressed = buttons_pressed;
                 } else {
                     self.update_game_end();
-                    break 'event_simulation
+                    break 'event_simulation;
                 }
             }
         }
@@ -729,11 +783,7 @@ impl Game {
         }
     }
 
-    fn handle_event(
-        &mut self,
-        event: InternalEvent,
-        event_time: GameTime,
-    ) -> FeedbackEvents {
+    fn handle_event(&mut self, event: InternalEvent, event_time: GameTime) -> FeedbackEvents {
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
         let prev_piece_data = self.state.active_piece_data;

@@ -1,7 +1,8 @@
 use std::{collections::VecDeque, num::NonZeroU32};
 
 use tetrs_engine::{
-    Feedback, FeedbackEvents, Game, GameConfig, GameMode, GameOver, GameState, InternalEvent, Limits, Tetromino
+    Feedback, FeedbackEvents, Game, GameConfig, GameMode, GameOver, GameState, InternalEvent,
+    Limits, Tetromino,
 };
 
 const MAX_STAGE_ATTEMPTS: usize = 3;
@@ -67,7 +68,7 @@ pub fn make_game() -> Game {
             b"OOOOOOO  O",
             b"OOOOOOOO  ",
             ], VecDeque::from([Tetromino::Z,Tetromino::Z,Tetromino::Z,Tetromino::Z,])),
-        ("SuZ-spin trial", vec![
+        ("SuZ-spins", vec![
             b"OOOO  OOOO",
             b"OOO  OOOOO",
             b"OO    OOOO",
@@ -81,7 +82,7 @@ pub fn make_game() -> Game {
             b"OOOOOO OOO",
             b"OOOOO  OOO",
             ], VecDeque::from([Tetromino::J,Tetromino::I,])),
-        ("L/J-spin", vec![
+        ("L_J-spin", vec![
             b"OO      OO",
             b"OO OOOO OO",
             b"OO  OO  OO",
@@ -90,7 +91,7 @@ pub fn make_game() -> Game {
             b"OOOOO OOOO",
             b"OOO   OOOO",
             ], VecDeque::from([Tetromino::L,])),
-        ("L/J-spin trial", vec![
+        ("L/J-spins", vec![
             b"O   OO   O",
             b"O O OO O O",
             b"O   OO   O",
@@ -109,7 +110,7 @@ pub fn make_game() -> Game {
             b"OOOO OOOOO",
             b"OOOO OOOOO",
             ], VecDeque::from([Tetromino::L,Tetromino::L,])),
-        ("L-turn revisited", vec![
+        ("7-turn", vec![
             b"OOOOO  OOO",
             b"OOO    OOO",
             b"OOOO OOOOO",
@@ -123,28 +124,28 @@ pub fn make_game() -> Game {
             b"OOO OOOOOO",
             ], VecDeque::from([Tetromino::L,Tetromino::L,Tetromino::O,])),
         // T-spins.
-        ("T-spin", vec![
+        ("T-spin Single", vec![
             b"OOOO    OO",
             b"OOO   OOOO",
             b"OOOO OOOOO",
             ], VecDeque::from([Tetromino::T,Tetromino::I])),
-        ("T-spin", vec![
+        ("T-spin Double", vec![
             b"OOOO    OO",
             b"OOO   OOOO",
             b"OOOO OOOOO",
             ], VecDeque::from([Tetromino::T,Tetromino::L])),
-        ("T-turn", vec![
+        ("T-tuck", vec![
             b"OOO   OOOO",
             b"OOOO  OOOO",
             b"OOOO   OOO",
             ], VecDeque::from([Tetromino::T,Tetromino::T])),
-        ("Tetrs T-spin", vec![
+        ("T-spin ...", vec![
             b"OOO  OOOOO",
             b"OOO  OOOOO",
             b"OOOO   OOO",
             b"OOOOO OOOO",
             ], VecDeque::from([Tetromino::T,Tetromino::O])),
-        ("Tetrs T-spin Triple", vec![
+        ("T-spin Triple!", vec![
             b"OOO   OOOO",
             b"OOO  OOOOO",
             b"OOOO   OOO",
@@ -157,13 +158,11 @@ pub fn make_game() -> Game {
     let mut current_puzzle_attempt = 0;
     let mut current_puzzle_piececnt_limit = 0;
     let puzzle_num = NonZeroU32::try_from(u32::try_from(puzzles.len()).unwrap()).unwrap();
-    let puzzle_modifier = move |
-            config: &mut GameConfig,
-            _mode: &mut GameMode,
-            state: &mut GameState,
-            feedback_events: &mut FeedbackEvents,
-            before_event: Option<InternalEvent>,
-    | {
+    let puzzle_modifier = move |config: &mut GameConfig,
+                                _mode: &mut GameMode,
+                                state: &mut GameState,
+                                feedback_events: &mut FeedbackEvents,
+                                before_event: Option<InternalEvent>| {
         let game_piececnt = usize::try_from(state.pieces_played.iter().sum::<u32>()).unwrap();
 
         if before_event.is_some() {
@@ -205,7 +204,11 @@ pub fn make_game() -> Game {
                     feedback_events.push((
                         state.game_time,
                         Feedback::Message(if current_puzzle_attempt == 1 {
-                            format!("Stage {}: {}", 1+current_puzzle, puzzle_name.to_ascii_uppercase())
+                            format!(
+                                "Stage {}: {}",
+                                1 + current_puzzle,
+                                puzzle_name.to_ascii_uppercase()
+                            )
                         } else {
                             format!(
                                 "{}.RETRY ({})",
@@ -245,7 +248,10 @@ pub fn make_game() -> Game {
         name: "Puzzle".to_string(),
         start_level: NonZeroU32::MIN.saturating_add(1),
         increment_level: false,
-        limits: Limits { level: Some((true, puzzle_num)), ..Default::default() },
+        limits: Limits {
+            level: Some((true, puzzle_num)),
+            ..Default::default()
+        },
     });
     unsafe { game.add_modifier(Box::new(puzzle_modifier)) };
     game

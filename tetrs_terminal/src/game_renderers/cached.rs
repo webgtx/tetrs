@@ -13,8 +13,8 @@ use crossterm::{
     terminal, QueueableCommand,
 };
 use tetrs_engine::{
-    Button, Coord, Feedback, FeedbackEvents, Game, GameState, GameTime, Orientation,
-    Tetromino, TileTypeID,
+    Button, Coord, Feedback, FeedbackEvents, Game, GameState, GameTime, Orientation, Tetromino,
+    TileTypeID,
 };
 
 use crate::{
@@ -187,12 +187,42 @@ impl GameScreenRenderer for Renderer {
         let mode_name = game.mode().name.to_ascii_uppercase();
         let mode_name_space = mode_name.len().max(14);
         let (goal_name, goal_value) = [
-            game.mode().limits.time.map(|(_, max_dur)| ("Time left:", format_duration(max_dur.saturating_sub(*game_time)))),
-            game.mode().limits.pieces.map(|(_, max_pcs)| ("Pieces remaining:", max_pcs.saturating_sub(pieces_played.iter().sum::<u32>()).to_string())),
-            game.mode().limits.lines.map(|(_, max_lns)| ("Lines left to clear:", max_lns.saturating_sub(*lines_cleared).to_string())),
-            game.mode().limits.level.map(|(_, max_lvl)| ("Levels remaining:", max_lvl.get().saturating_sub(level.get()).to_string())),
-            game.mode().limits.score.map(|(_, max_pts)| ("Points to score:", max_pts.saturating_sub(*score).to_string())),
-        ].into_iter().find_map(|limit_text| limit_text).unwrap_or_default();
+            game.mode().limits.time.map(|(_, max_dur)| {
+                (
+                    "Time left:",
+                    format_duration(max_dur.saturating_sub(*game_time)),
+                )
+            }),
+            game.mode().limits.pieces.map(|(_, max_pcs)| {
+                (
+                    "Pieces remaining:",
+                    max_pcs
+                        .saturating_sub(pieces_played.iter().sum::<u32>())
+                        .to_string(),
+                )
+            }),
+            game.mode().limits.lines.map(|(_, max_lns)| {
+                (
+                    "Lines left to clear:",
+                    max_lns.saturating_sub(*lines_cleared).to_string(),
+                )
+            }),
+            game.mode().limits.level.map(|(_, max_lvl)| {
+                (
+                    "Levels remaining:",
+                    max_lvl.get().saturating_sub(level.get()).to_string(),
+                )
+            }),
+            game.mode().limits.score.map(|(_, max_pts)| {
+                (
+                    "Points to score:",
+                    max_pts.saturating_sub(*score).to_string(),
+                )
+            }),
+        ]
+        .into_iter()
+        .find_map(|limit_text| limit_text)
+        .unwrap_or_default();
         let (focus_name, focus_value) = match game.mode().name.as_str() {
             "Marathon" => ("Score:", score.to_string()),
             "40-Lines" => ("Time taken:", format_duration(*game_time)),
@@ -346,7 +376,8 @@ impl GameScreenRenderer for Renderer {
         }
         self.hard_drop_tiles.retain(|elt| elt.4);
         // Board: draw fixed tiles.
-        let (tile_locked, tile_ghost, tile_active, tile_preview) = if app.settings().ascii_graphics {
+        let (tile_locked, tile_ghost, tile_active, tile_preview) = if app.settings().ascii_graphics
+        {
             ("##", "::", "[]", "[]")
         } else {
             ("██", "░░", "▓▓", "▒▒")
@@ -533,7 +564,8 @@ impl GameScreenRenderer for Renderer {
                         20 => "Vigintuple",
                         21 => "Kirbtris",
                         _ => "unreachable",
-                    }.to_string();
+                    }
+                    .to_string();
                     if *lineclears <= 4 {
                         action_stats.0[usize::try_from(*lineclears).unwrap()] += 1;
                     } else {

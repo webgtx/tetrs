@@ -106,7 +106,9 @@ pub struct Settings {
 }
 
 // For the "New Game" menu.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub enum Stat {
     Time(Duration),
     Pieces(u32),
@@ -115,7 +117,9 @@ pub enum Stat {
     Score(u32),
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct CustomModeSettings {
     name: String,
     start_level: NonZeroU32,
@@ -234,7 +238,8 @@ impl<T: Write> App<T> {
         let mut file = File::open(Self::SAVE_FILE)?;
         let mut save_str = String::new();
         file.read_to_string(&mut save_str)?;
-        (self.settings, self.custom_game_settings, self.past_games) = serde_json::from_str(&save_str)?;
+        (self.settings, self.custom_game_settings, self.past_games) =
+            serde_json::from_str(&save_str)?;
         Ok(())
     }
 
@@ -536,7 +541,10 @@ impl<T: Write> App<T> {
             if selected == selected_cnt - 1 {
                 let stats_strs = [
                     format!("* level start: {}", self.custom_game_settings.start_level),
-                    format!("* level increment: {}", self.custom_game_settings.increment_level),
+                    format!(
+                        "* level increment: {}",
+                        self.custom_game_settings.increment_level
+                    ),
                     format!("* limit: {:?}", self.custom_game_settings.mode_limit),
                 ];
                 for (j, stat_str) in stats_strs.into_iter().enumerate() {
@@ -579,20 +587,40 @@ impl<T: Write> App<T> {
                     ..
                 }) => {
                     let mut game = if selected == selected_cnt - 1 {
-                        let CustomModeSettings { name, start_level, increment_level, mode_limit: custom_mode_limit } = self.custom_game_settings.clone();
+                        let CustomModeSettings {
+                            name,
+                            start_level,
+                            increment_level,
+                            mode_limit: custom_mode_limit,
+                        } = self.custom_game_settings.clone();
                         let limits = match custom_mode_limit {
-                            Some(Stat::Time(max_dur)) => Limits { time: Some((true, max_dur)), ..Default::default() },
-                            Some(Stat::Pieces(max_pcs)) => Limits { pieces: Some((true, max_pcs)), ..Default::default() },
-                            Some(Stat::Lines(max_lns)) => Limits { lines: Some((true, max_lns)), ..Default::default() },
-                            Some(Stat::Level(max_lvl)) => Limits { level: Some((true, max_lvl)), ..Default::default() },
-                            Some(Stat::Score(max_pts)) => Limits { score: Some((true, max_pts)), ..Default::default() },
+                            Some(Stat::Time(max_dur)) => Limits {
+                                time: Some((true, max_dur)),
+                                ..Default::default()
+                            },
+                            Some(Stat::Pieces(max_pcs)) => Limits {
+                                pieces: Some((true, max_pcs)),
+                                ..Default::default()
+                            },
+                            Some(Stat::Lines(max_lns)) => Limits {
+                                lines: Some((true, max_lns)),
+                                ..Default::default()
+                            },
+                            Some(Stat::Level(max_lvl)) => Limits {
+                                level: Some((true, max_lvl)),
+                                ..Default::default()
+                            },
+                            Some(Stat::Score(max_pts)) => Limits {
+                                score: Some((true, max_pts)),
+                                ..Default::default()
+                            },
                             None => Limits::default(),
                         };
                         Game::new(GameMode {
                             name,
                             start_level,
                             increment_level,
-                            limits
+                            limits,
                         })
                     } else if selected == selected_cnt - 2 {
                         puzzle_mode::make_game()
@@ -654,8 +682,10 @@ impl<T: Write> App<T> {
                     if selected_custom > 0 {
                         match selected_custom {
                             1 => {
-                                self.custom_game_settings.start_level =
-                                    self.custom_game_settings.start_level.saturating_add(d_level);
+                                self.custom_game_settings.start_level = self
+                                    .custom_game_settings
+                                    .start_level
+                                    .saturating_add(d_level);
                             }
                             2 => {
                                 self.custom_game_settings.increment_level =
@@ -754,16 +784,17 @@ impl<T: Write> App<T> {
                     if selected == selected_cnt - 1 {
                         // If reached last stat, cycle through stats for limit.
                         if selected_custom == selected_custom_cnt - 1 {
-                            self.custom_game_settings.mode_limit = match self.custom_game_settings.mode_limit {
-                                Some(Stat::Time(_)) => Some(Stat::Score(9000)),
-                                Some(Stat::Score(_)) => Some(Stat::Pieces(100)),
-                                Some(Stat::Pieces(_)) => Some(Stat::Lines(40)),
-                                Some(Stat::Lines(_)) => {
-                                    Some(Stat::Level(NonZeroU32::try_from(25).unwrap()))
-                                }
-                                Some(Stat::Level(_)) => None,
-                                None => Some(Stat::Time(Duration::from_secs(120))),
-                            };
+                            self.custom_game_settings.mode_limit =
+                                match self.custom_game_settings.mode_limit {
+                                    Some(Stat::Time(_)) => Some(Stat::Score(9000)),
+                                    Some(Stat::Score(_)) => Some(Stat::Pieces(100)),
+                                    Some(Stat::Pieces(_)) => Some(Stat::Lines(40)),
+                                    Some(Stat::Lines(_)) => {
+                                        Some(Stat::Level(NonZeroU32::try_from(25).unwrap()))
+                                    }
+                                    Some(Stat::Level(_)) => None,
+                                    None => Some(Stat::Time(Duration::from_secs(120))),
+                                };
                         } else {
                             selected_custom += 1
                         }
@@ -1103,7 +1134,10 @@ impl<T: Write> App<T> {
         }
     }
 
-    fn game_over_menu(&mut self, finished_game_stats: &FinishedGameStats) -> io::Result<MenuUpdate> {
+    fn game_over_menu(
+        &mut self,
+        finished_game_stats: &FinishedGameStats,
+    ) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
             Menu::Settings,
@@ -1113,7 +1147,10 @@ impl<T: Write> App<T> {
         self.generic_game_finished(selection, false, finished_game_stats)
     }
 
-    fn game_complete_menu(&mut self, finished_game_stats: &FinishedGameStats) -> io::Result<MenuUpdate> {
+    fn game_complete_menu(
+        &mut self,
+        finished_game_stats: &FinishedGameStats,
+    ) -> io::Result<MenuUpdate> {
         let selection = vec![
             Menu::NewGame,
             Menu::Settings,
@@ -1454,61 +1491,131 @@ impl<T: Write> App<T> {
                      }| {
                         match gamemode.name.as_str() {
                             "Marathon" => {
-                                format!("{timestamp} ~ Marathon: {} pts{}",
+                                format!(
+                                    "{timestamp} ~ Marathon: {} pts{}",
                                     last_state.score,
-                                    if last_state.end.is_some_and(|end| end.is_ok()) { "".to_string() } else {
-                                        let Limits { level: Some((_, max_lvl)), .. } = gamemode.limits else { panic!() };
+                                    if last_state.end.is_some_and(|end| end.is_ok()) {
+                                        "".to_string()
+                                    } else {
+                                        let Limits {
+                                            level: Some((_, max_lvl)),
+                                            ..
+                                        } = gamemode.limits
+                                        else {
+                                            panic!()
+                                        };
                                         format!(" ({}/{} lvl)", last_state.level, max_lvl)
                                     },
                                 )
-                            },
+                            }
                             "40-Lines" => {
-                                format!("{timestamp} ~ 40-Lines: {}{}",
+                                format!(
+                                    "{timestamp} ~ 40-Lines: {}{}",
                                     format_duration(last_state.game_time),
-                                    if last_state.end.is_some_and(|end| end.is_ok()) { "".to_string() } else {
-                                        let Limits { lines: Some((_, max_lns)), .. } = gamemode.limits else { panic!() };
+                                    if last_state.end.is_some_and(|end| end.is_ok()) {
+                                        "".to_string()
+                                    } else {
+                                        let Limits {
+                                            lines: Some((_, max_lns)),
+                                            ..
+                                        } = gamemode.limits
+                                        else {
+                                            panic!()
+                                        };
                                         format!(" ({}/{} lns)", last_state.lines_cleared, max_lns)
                                     },
                                 )
-                            },
+                            }
                             "Time Trial" => {
-                                format!("{timestamp} ~ Time Trial: {} lns{}",
+                                format!(
+                                    "{timestamp} ~ Time Trial: {} lns{}",
                                     last_state.lines_cleared,
-                                    if last_state.end.is_some_and(|end| end.is_ok()) { "".to_string() } else {
-                                        let Limits { time: Some((_, max_dur)), .. } = gamemode.limits else { panic!() };
-                                        format!(" ({} / {})", format_duration(last_state.game_time), format_duration(max_dur))
+                                    if last_state.end.is_some_and(|end| end.is_ok()) {
+                                        "".to_string()
+                                    } else {
+                                        let Limits {
+                                            time: Some((_, max_dur)),
+                                            ..
+                                        } = gamemode.limits
+                                        else {
+                                            panic!()
+                                        };
+                                        format!(
+                                            " ({} / {})",
+                                            format_duration(last_state.game_time),
+                                            format_duration(max_dur)
+                                        )
                                     },
                                 )
-                            },
+                            }
                             "Master" => {
-                                let Limits { lines: Some((_, max_lns)), .. } = gamemode.limits else { panic!() };
-                                format!("{timestamp} ~ Master: {}/{} lns", last_state.lines_cleared, max_lns)
-                            },
+                                let Limits {
+                                    lines: Some((_, max_lns)),
+                                    ..
+                                } = gamemode.limits
+                                else {
+                                    panic!()
+                                };
+                                format!(
+                                    "{timestamp} ~ Master: {}/{} lns",
+                                    last_state.lines_cleared, max_lns
+                                )
+                            }
                             "Puzzle" => {
-                                format!("{timestamp} ~ Puzzle Mode: {}{}",
+                                format!(
+                                    "{timestamp} ~ Puzzle Mode: {}{}",
                                     format_duration(last_state.game_time),
-                                    if last_state.end.is_some_and(|end| end.is_ok()) { "".to_string() } else {
-                                        let Limits { level: Some((_, max_lvl)), .. } = gamemode.limits else { panic!() };
+                                    if last_state.end.is_some_and(|end| end.is_ok()) {
+                                        "".to_string()
+                                    } else {
+                                        let Limits {
+                                            level: Some((_, max_lvl)),
+                                            ..
+                                        } = gamemode.limits
+                                        else {
+                                            panic!()
+                                        };
                                         format!(" ({}/{} lvl)", last_state.level, max_lvl)
                                     },
                                 )
-                            },
+                            }
                             _ => {
-                                format!("{timestamp} ~ Custom Mode: {} lns, {} pts, {}{}",
+                                format!(
+                                    "{timestamp} ~ Custom Mode: {} lns, {} pts, {}{}",
                                     last_state.lines_cleared,
                                     last_state.score,
                                     format_duration(last_state.game_time),
                                     [
-                                        gamemode.limits.time.map(|(_, max_dur)| format!(" ({} / {})", format_duration(last_state.game_time), format_duration(max_dur))),
-                                        gamemode.limits.pieces.map(|(_, max_pcs)| format!(" ({}/{} pcs)", last_state.pieces_played.iter().sum::<u32>(), max_pcs)),
-                                        gamemode.limits.lines.map(|(_, max_lns)| format!(" ({}/{} lns)", last_state.lines_cleared, max_lns)),
-                                        gamemode.limits.level.map(|(_, max_lvl)| format!(" ({}/{} lvl)", last_state.level, max_lvl)),
-                                        gamemode.limits.score.map(|(_, max_pts)| format!(" ({}/{} pts)", last_state.score, max_pts)),
-                                    ].into_iter().find_map(|limit_text| limit_text).unwrap_or_default()
+                                        gamemode.limits.time.map(|(_, max_dur)| format!(
+                                            " ({} / {})",
+                                            format_duration(last_state.game_time),
+                                            format_duration(max_dur)
+                                        )),
+                                        gamemode.limits.pieces.map(|(_, max_pcs)| format!(
+                                            " ({}/{} pcs)",
+                                            last_state.pieces_played.iter().sum::<u32>(),
+                                            max_pcs
+                                        )),
+                                        gamemode.limits.lines.map(|(_, max_lns)| format!(
+                                            " ({}/{} lns)",
+                                            last_state.lines_cleared, max_lns
+                                        )),
+                                        gamemode.limits.level.map(|(_, max_lvl)| format!(
+                                            " ({}/{} lvl)",
+                                            last_state.level, max_lvl
+                                        )),
+                                        gamemode.limits.score.map(|(_, max_pts)| format!(
+                                            " ({}/{} pts)",
+                                            last_state.score, max_pts
+                                        )),
+                                    ]
+                                    .into_iter()
+                                    .find_map(|limit_text| limit_text)
+                                    .unwrap_or_default()
                                 )
-                            },
+                            }
                         }
-                    }
+                    },
                 )
                 .collect::<Vec<_>>();
             let n_entries = entries.len();
@@ -1520,10 +1627,7 @@ impl<T: Write> App<T> {
                     ))?
                     .queue(Print(format!("{:<w_main$}", entry)))?;
             }
-            let entries_left = self
-                .past_games
-                .len()
-                .saturating_sub(max_entries + scroll);
+            let entries_left = self.past_games.len().saturating_sub(max_entries + scroll);
             if entries_left > 0 {
                 self.term
                     .queue(MoveTo(
