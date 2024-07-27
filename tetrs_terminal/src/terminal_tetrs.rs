@@ -67,7 +67,6 @@ enum Menu {
     Quit(String),
 }
 
-// TODO: Remove.
 impl std::fmt::Display for Menu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
@@ -631,37 +630,12 @@ impl<T: Write> App<T> {
                     game.config_mut().rotation_system = self.settings.rotation_system;
                     game.config_mut().no_soft_drop_lock = self.settings.no_soft_drop_lock;
 
-                    // TODO: Remove debug.
-                    /*let display_tetromino_likelihood_mod = move |
-                            config: &mut GameConfig,
-                            state: &mut GameState,
-                            feedback_events: &mut FeedbackEvents,
-                            before_event: Option<InternalEvent>,
-                    | {
-                        let TetrominoGenerator::Recency { last_generated: lg } = self.config.tetromino_generator else { panic!() };
-                        let mut pieces_played_strs = [
-                            Tetromino::O,
-                            Tetromino::I,
-                            Tetromino::S,
-                            Tetromino::Z,
-                            Tetromino::T,
-                            Tetromino::L,
-                            Tetromino::J,
-                        ];
-                        self.config.line_clear_delay = Duration::ZERO;
-                        self.config.appearance_delay = Duration::ZERO;
-                        pieces_played_strs.sort_by_key(|&t| lg[t]);
-                        feedback_events.push((event_time,Feedback::Message(pieces_played_strs.map(|t| format!("{} {t:?}{}{}{}", self.state.update_counter, lg[t],
-                        // "█".repeat(lg[t] as usize),
-                        "█".repeat((lg[t] * lg[t]) as usize / 8),
-                        [" ","▏","▎","▍","▌","▋","▊","▉"][(lg[t] * lg[t]) as usize % 8]
-                        ).to_ascii_lowercase()).join(""))));
-                        // feedback_events.push((event_time,Feedback::Message(pieces_played_strs.map(|t| format!("{}{:?}", lg[t], t).to_ascii_lowercase()).join(" "))));
-                        self.state.board.remove(0);
-                        self.state.board.push(Default::default());
-                        self.state.board.remove(0);
-                        self.state.board.push(Default::default());
-                    };*/
+                    // TODO: Remove or make accessible.
+                    // unsafe {
+                    //     game.add_modifier(Box::new(
+                    //         crate::game_mods::display_tetromino_likelihood_mod,
+                    //     ))
+                    // };
 
                     let now = Instant::now();
                     break Ok(MenuUpdate::Push(Menu::Game {
@@ -883,7 +857,7 @@ impl<T: Write> App<T> {
                         buttons_pressed[button] = button_state;
                         let game_time_userinput = instant.saturating_duration_since(*time_started)
                             - *total_duration_paused;
-                        let game_now = std::cmp::max(game_time_userinput, game.state().game_time);
+                        let game_now = std::cmp::max(game_time_userinput, game.state().time);
                         // TODO: Handle/ensure no Err.
                         if let Ok(evts) = game.update(Some(buttons_pressed), game_now) {
                             new_feedback_events.extend(evts);
@@ -904,7 +878,6 @@ impl<T: Write> App<T> {
                     }
                 };
             }
-            // TODO: Make this more elegantly modular.
             game_renderer.render(
                 self,
                 game,
@@ -946,7 +919,7 @@ impl<T: Write> App<T> {
         Ok(menu_update)
     }
 
-    fn generic_game_finished(
+    fn generic_game_ended(
         &mut self,
         selection: Vec<Menu>,
         success: bool,
@@ -960,8 +933,8 @@ impl<T: Write> App<T> {
             last_state,
         } = finished_game_stats;
         let GameState {
-            game_time,
-            update_counter: _,
+            time: game_time,
+            event_ticker: _,
             end: _,
             events: _,
             buttons_pressed: _,
@@ -1015,11 +988,15 @@ impl<T: Write> App<T> {
                     "{:^w_main$}",
                     if success {
                         format!(
-                            "+ Game Completed! ({}) +",
+                            "+ Game Completed! [{}] +",
                             gamemode.name.to_ascii_uppercase()
                         )
                     } else {
-                        format!("- Game Over. ({}) -", gamemode.name)
+                        format!(
+                            "- Game Over ({:?}). [{}] -",
+                            last_state.end.unwrap().unwrap_err(),
+                            gamemode.name
+                        )
                     }
                 )))?
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
@@ -1144,7 +1121,7 @@ impl<T: Write> App<T> {
             Menu::Scores,
             Menu::Quit("quit after game over".to_string()),
         ];
-        self.generic_game_finished(selection, false, finished_game_stats)
+        self.generic_game_ended(selection, false, finished_game_stats)
     }
 
     fn game_complete_menu(
@@ -1157,7 +1134,7 @@ impl<T: Write> App<T> {
             Menu::Scores,
             Menu::Quit("quit after game complete".to_string()),
         ];
-        self.generic_game_finished(selection, true, finished_game_stats)
+        self.generic_game_ended(selection, true, finished_game_stats)
     }
 
     fn pause_menu(&mut self) -> io::Result<MenuUpdate> {
@@ -1511,7 +1488,7 @@ impl<T: Write> App<T> {
                             "40-Lines" => {
                                 format!(
                                     "{timestamp} ~ 40-Lines: {}{}",
-                                    format_duration(last_state.game_time),
+                                    format_duration(last_state.time),
                                     if last_state.end.is_some_and(|end| end.is_ok()) {
                                         "".to_string()
                                     } else {
@@ -1542,7 +1519,7 @@ impl<T: Write> App<T> {
                                         };
                                         format!(
                                             " ({} / {})",
-                                            format_duration(last_state.game_time),
+                                            format_duration(last_state.time),
                                             format_duration(max_dur)
                                         )
                                     },
@@ -1564,7 +1541,7 @@ impl<T: Write> App<T> {
                             "Puzzle" => {
                                 format!(
                                     "{timestamp} ~ Puzzle Mode: {}{}",
-                                    format_duration(last_state.game_time),
+                                    format_duration(last_state.time),
                                     if last_state.end.is_some_and(|end| end.is_ok()) {
                                         "".to_string()
                                     } else {
@@ -1584,11 +1561,11 @@ impl<T: Write> App<T> {
                                     "{timestamp} ~ Custom Mode: {} lns, {} pts, {}{}",
                                     last_state.lines_cleared,
                                     last_state.score,
-                                    format_duration(last_state.game_time),
+                                    format_duration(last_state.time),
                                     [
                                         gamemode.limits.time.map(|(_, max_dur)| format!(
                                             " ({} / {})",
-                                            format_duration(last_state.game_time),
+                                            format_duration(last_state.time),
                                             format_duration(max_dur)
                                         )),
                                         gamemode.limits.pieces.map(|(_, max_pcs)| format!(
@@ -1724,12 +1701,12 @@ impl<T: Write> App<T> {
                                 // Sort desc by lines.
                                 stats1.last_state.lines_cleared.cmp(&stats2.last_state.lines_cleared).reverse().then_with(||
                                     // Sort asc by time.
-                                    stats1.last_state.game_time.cmp(&stats2.last_state.game_time)
+                                    stats1.last_state.time.cmp(&stats2.last_state.time)
                                 )
                             },
                             "Time Trial" => {
                                 // Sort asc by time.
-                                stats1.last_state.game_time.cmp(&stats2.last_state.game_time).then_with(||
+                                stats1.last_state.time.cmp(&stats2.last_state.time).then_with(||
                                     // Sort by desc lines.
                                     stats1.last_state.lines_cleared.cmp(&stats2.last_state.lines_cleared).reverse()
                                 )
@@ -1742,7 +1719,7 @@ impl<T: Write> App<T> {
                                 // Sort desc by level.
                                 stats1.last_state.level.cmp(&stats2.last_state.level).reverse().then_with(||
                                     // Sort asc by time.
-                                    stats1.last_state.game_time.cmp(&stats2.last_state.game_time)
+                                    stats1.last_state.time.cmp(&stats2.last_state.time)
                                 )
                             },
                             _ => {

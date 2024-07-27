@@ -34,7 +34,7 @@ impl GameScreenRenderer for Renderer {
     {
         // Draw game stuf
         let GameState {
-            game_time,
+            time: game_time,
             board,
             active_piece_data,
             ..

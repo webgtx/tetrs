@@ -1,6 +1,5 @@
 use std::{
     cmp::Ordering,
-    collections::VecDeque,
     fmt::Debug,
     io::{self, Write},
     time::Duration,
@@ -34,7 +33,7 @@ struct ScreenBuf {
 pub struct Renderer {
     screen: ScreenBuf,
     visual_events: Vec<(GameTime, Feedback, bool)>,
-    messages: VecDeque<(GameTime, String)>,
+    messages: Vec<(GameTime, String)>,
     hard_drop_tiles: Vec<(GameTime, Coord, usize, TileTypeID, bool)>,
 }
 
@@ -168,8 +167,8 @@ impl GameScreenRenderer for Renderer {
                 .buf_reset((usize::from(x_main), usize::from(y_main)));
         }
         let GameState {
-            game_time,
-            update_counter: _,
+            time: game_time,
+            event_ticker: _,
             end: _,
             events: _,
             buttons_pressed: _,
@@ -376,8 +375,7 @@ impl GameScreenRenderer for Renderer {
         }
         self.hard_drop_tiles.retain(|elt| elt.4);
         // Board: draw fixed tiles.
-        let (tile_locked, tile_ghost, tile_active, tile_preview) = if app.settings().ascii_graphics
-        {
+        let (tile_fixed, tile_ghost, tile_active, tile_preview) = if app.settings().ascii_graphics {
             ("##", "::", "[]", "[]")
         } else {
             ("██", "░░", "▓▓", "▒▒")
@@ -386,7 +384,7 @@ impl GameScreenRenderer for Renderer {
             for (x, cell) in line.iter().enumerate() {
                 if let Some(tile_type_id) = cell {
                     self.screen
-                        .buf_str(tile_locked, tile_color(*tile_type_id), pos_board((x, y)));
+                        .buf_str(tile_fixed, tile_color(*tile_type_id), pos_board((x, y)));
                 }
             }
         }
@@ -425,7 +423,7 @@ impl GameScreenRenderer for Renderer {
                 .map(|(time, event)| (time, event, true)),
         );
         // Draw events.
-        for (event_time, event, relevant) in self.visual_events.iter_mut().rev() {
+        for (event_time, event, relevant) in self.visual_events.iter_mut() {
             let elapsed = game_time.saturating_sub(*event_time);
             match event {
                 Feedback::PieceLocked(piece) => {
@@ -578,18 +576,18 @@ impl GameScreenRenderer for Renderer {
                     if *back_to_back > 1 {
                         strs.push(format!("({back_to_back}.B2B)"));
                     }
-                    self.messages.push_front((*event_time, strs.join(" ")));
+                    self.messages.push((*event_time, strs.join(" ")));
                     *relevant = false;
                 }
                 Feedback::Message(msg) => {
-                    self.messages.push_front((*event_time, msg.clone()));
+                    self.messages.push((*event_time, msg.clone()));
                     *relevant = false;
                 }
             }
         }
         self.visual_events.retain(|elt| elt.2);
         // Draw messages.
-        for (y, (_event_time, message)) in self.messages.iter().enumerate() {
+        for (y, (_event_time, message)) in self.messages.iter().rev().enumerate() {
             let pos = (x_messages, y_messages + y);
             self.screen.buf_str(message, None, pos);
         }

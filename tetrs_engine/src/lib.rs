@@ -28,7 +28,7 @@ pub type FnGameMod = Box<
         &mut GameMode,
         &mut GameState,
         &mut FeedbackEvents,
-        Option<InternalEvent>,
+        Result<InternalEvent, InternalEvent>,
     ),
 >;
 type EventMap = HashMap<InternalEvent, GameTime>;
@@ -146,8 +146,8 @@ pub enum GameOver {
 #[derive(Eq, PartialEq, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameState {
-    pub game_time: GameTime,
-    pub update_counter: u64,
+    pub time: GameTime,
+    pub event_ticker: u64,
     pub end: Option<Result<(), GameOver>>,
     /// Invariants:
     /// * Until the game has finished there will always be more events: `finished.is_some() || !next_events.is_empty()`.
@@ -387,7 +387,7 @@ impl GameMode {
             start_level: NonZeroU32::MIN,
             increment_level: true,
             limits: Limits {
-                level: Some((true, Game::LEVEL_20G.saturating_add(1))),
+                level: Some((true, Game::LEVEL_20G)),
                 ..Default::default()
             },
         }
@@ -516,8 +516,8 @@ impl Game {
     pub fn with_config(gamemode: GameMode, mut config: GameConfig) -> Self {
         let mut rng = rand::thread_rng();
         let state = GameState {
-            game_time: Duration::ZERO,
-            update_counter: 0,
+            time: Duration::ZERO,
+            event_ticker: 0,
             end: None,
             events: HashMap::from([(InternalEvent::Spawn, Duration::ZERO)]),
             buttons_pressed: Default::default(),
@@ -583,7 +583,7 @@ impl Game {
                 self.mode
                     .limits
                     .time
-                    .and_then(|(win, dur)| (dur <= self.state.game_time).then_some(win)),
+                    .and_then(|(win, dur)| (dur <= self.state.time).then_some(win)),
                 self.mode.limits.pieces.and_then(|(win, pcs)| {
                     (pcs <= self.state.pieces_played.iter().sum()).then_some(win)
                 }),
@@ -594,7 +594,7 @@ impl Game {
                 self.mode
                     .limits
                     .level
-                    .and_then(|(win, lvl)| (lvl <= self.state.level).then_some(win)),
+                    .and_then(|(win, lvl)| (lvl < self.state.level).then_some(win)),
                 self.mode
                     .limits
                     .score
@@ -616,7 +616,7 @@ impl Game {
     fn apply_modifiers(
         &mut self,
         feedback_events: &mut Vec<(GameTime, Feedback)>,
-        before_event: Option<InternalEvent>,
+        before_event: Result<InternalEvent, InternalEvent>,
     ) {
         for modify in &mut self.modifiers {
             modify(
@@ -649,7 +649,7 @@ impl Game {
             - else return immediately
          */
         // Invalid call: return immediately.
-        if update_time < self.state.game_time {
+        if update_time < self.state.time {
             return Err(GameUpdateError::DurationPassed);
         }
         // NOTE: Returning an empty Vec is efficient because it won't even allocate (as by Rust API).
@@ -659,7 +659,6 @@ impl Game {
         };
         // We linearly process all events until we reach the update time.
         'event_simulation: loop {
-            self.state.update_counter += 1;
             // Peek the next closest event.
             // SAFETY: `Game` invariants guarantee there's some event.
             let (&event, &event_time) = self
@@ -670,13 +669,13 @@ impl Game {
                 .unwrap();
             // Next event within requested update time, handle event first.
             if event_time <= update_time {
-                self.apply_modifiers(&mut feedback_events, Some(event));
+                self.apply_modifiers(&mut feedback_events, Ok(event));
                 // Remove next event and handle it.
                 self.state.events.remove_entry(&event);
                 let new_feedback_events = self.handle_event(event, event_time);
-                self.state.game_time = event_time;
+                self.state.time = event_time;
                 feedback_events.extend(new_feedback_events);
-                self.apply_modifiers(&mut feedback_events, None);
+                self.apply_modifiers(&mut feedback_events, Err(event));
                 // Stop simulation early if event or modifier ended game.
                 self.update_game_end();
                 if self.ended() {
@@ -685,7 +684,7 @@ impl Game {
             // Possibly process user input events now or break out.
             } else {
                 // NOTE: We should be able to update the time here because `self.process_input(...)` does not access it.
-                self.state.game_time = update_time;
+                self.state.time = update_time;
                 // Update button inputs.
                 if let Some(buttons_pressed) = new_button_state.take() {
                     if self.state.active_piece_data.is_some() {
@@ -784,6 +783,7 @@ impl Game {
     }
 
     fn handle_event(&mut self, event: InternalEvent, event_time: GameTime) -> FeedbackEvents {
+        self.state.event_ticker += 1;
         // Active piece touches the ground before update (or doesn't exist, counts as not touching).
         let mut feedback_events = Vec::new();
         let prev_piece_data = self.state.active_piece_data;
@@ -795,19 +795,23 @@ impl Game {
                     prev_piece.is_none(),
                     "spawning new piece while an active piece is still in play"
                 );
-                let n_required_pieces =
-                    (1 + self.config.preview_count).saturating_sub(self.state.next_pieces.len());
+                let tetromino = self.state.next_pieces.pop_front().unwrap_or_else(|| {
+                    self.config
+                        .tetromino_generator
+                        .with_rng(&mut self.rng)
+                        .next()
+                        .expect("piece generator ran out before game finished")
+                });
                 self.state.next_pieces.extend(
                     self.config
                         .tetromino_generator
                         .with_rng(&mut self.rng)
-                        .take(n_required_pieces),
+                        .take(
+                            self.config
+                                .preview_count
+                                .saturating_sub(self.state.next_pieces.len()),
+                        ),
                 );
-                let tetromino = self
-                    .state
-                    .next_pieces
-                    .pop_front()
-                    .expect("piece generator ran out before game finished");
                 let next_piece = self.config.rotation_system.place_initial(tetromino);
                 // Newly spawned piece conflicts with board - Game over.
                 if !next_piece.fits(&self.state.board) {
@@ -915,6 +919,7 @@ impl Game {
             }
             InternalEvent::Lock => {
                 let prev_piece = prev_piece.expect("locking none active piece");
+                feedback_events.push((event_time, Feedback::PieceLocked(prev_piece)));
                 // Attempt to lock active piece fully above skyline - Game over.
                 if prev_piece
                     .tiles()
@@ -992,7 +997,6 @@ impl Game {
                         event_time + self.config.appearance_delay,
                     );
                 }
-                feedback_events.push((event_time, Feedback::PieceLocked(prev_piece)));
                 None
             }
             InternalEvent::LineClear => {

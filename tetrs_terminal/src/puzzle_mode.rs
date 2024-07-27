@@ -139,13 +139,13 @@ pub fn make_game() -> Game {
             b"OOOO  OOOO",
             b"OOOO   OOO",
             ], VecDeque::from([Tetromino::T,Tetromino::T])),
-        ("T-spin ...", vec![
+        ("Tetrs T-spin", vec![
             b"OOO  OOOOO",
             b"OOO  OOOOO",
             b"OOOO   OOO",
             b"OOOOO OOOO",
             ], VecDeque::from([Tetromino::T,Tetromino::O])),
-        ("T-spin Triple!", vec![
+        ("Tetrs T-spin Triple", vec![
             b"OOO   OOOO",
             b"OOO  OOOOO",
             b"OOOO   OOO",
@@ -154,96 +154,101 @@ pub fn make_game() -> Game {
             b"OOOOO OOOO",
             ], VecDeque::from([Tetromino::T,Tetromino::J,Tetromino::L])),
     ];
-    let mut current_puzzle = 0;
+    let mut current_puzzle_level = 0;
     let mut current_puzzle_attempt = 0;
     let mut current_puzzle_piececnt_limit = 0;
     let puzzle_num = NonZeroU32::try_from(u32::try_from(puzzles.len()).unwrap()).unwrap();
-    let puzzle_modifier = move |config: &mut GameConfig,
-                                _mode: &mut GameMode,
-                                state: &mut GameState,
-                                feedback_events: &mut FeedbackEvents,
-                                before_event: Option<InternalEvent>| {
-        let game_piececnt = usize::try_from(state.pieces_played.iter().sum::<u32>()).unwrap();
+    let puzzle_modifier =
+        move |config: &mut GameConfig,
+              _mode: &mut GameMode,
+              state: &mut GameState,
+              feedback_events: &mut FeedbackEvents,
+              event: Result<InternalEvent, InternalEvent>| {
+            let game_piececnt = usize::try_from(state.pieces_played.iter().sum::<u32>()).unwrap();
 
-        if before_event.is_some() {
-            state.level = NonZeroU32::try_from(SPEED_LEVEL).unwrap();
-        } else {
-            state.level = NonZeroU32::try_from(u32::try_from(current_puzzle).unwrap()).unwrap();
-            // Delete accolades.
-            feedback_events.retain(|evt| !matches!(evt, (_, Feedback::Accolade { .. })));
-        }
-        if before_event != Some(InternalEvent::Spawn) {
-            return;
-        }
-        // End of puzzle / start of new one.
-        if game_piececnt == current_puzzle_piececnt_limit {
-            let puzzle_done = state
-                .board
-                .iter()
-                .all(|line| line.iter().all(|cell| cell.is_none()));
-            if !puzzle_done && current_puzzle_attempt >= MAX_STAGE_ATTEMPTS {
-                // Run out of attempts, game over.
-                state.end = Some(Err(GameOver::ModeLimit));
+            if event.is_ok() {
+                config.preview_count = 0;
+                state.level = NonZeroU32::try_from(SPEED_LEVEL).unwrap();
             } else {
-                // Change puzzle number or repeat attempt.
-                if puzzle_done {
-                    current_puzzle += 1;
-                    current_puzzle_attempt = 1;
+                config.preview_count = state.next_pieces.len();
+                state.level =
+                    NonZeroU32::try_from(u32::try_from(current_puzzle_level).unwrap()).unwrap();
+                // Delete accolades.
+                feedback_events.retain(|evt| !matches!(evt, (_, Feedback::Accolade { .. })));
+            }
+            // Remove spurious spawn.
+            if event == Err(InternalEvent::Spawn) && state.end.is_some() {
+                state.active_piece_data = None;
+            }
+            if event != Ok(InternalEvent::Spawn) {
+                return;
+            }
+            // End of puzzle / start of new one.
+            if game_piececnt == current_puzzle_piececnt_limit {
+                let puzzle_done = state
+                    .board
+                    .iter()
+                    .all(|line| line.iter().all(|cell| cell.is_none()));
+                if !puzzle_done && current_puzzle_attempt >= MAX_STAGE_ATTEMPTS {
+                    // Run out of attempts, game over.
+                    state.end = Some(Err(GameOver::ModeLimit));
                 } else {
-                    current_puzzle_attempt += 1;
-                }
-                if current_puzzle == puzzles.len() {
-                    // Done with all puzzles, game completed.
-                    state.end = Some(Ok(()));
-                } else {
-                    // Load in new puzzle.
-                    let (puzzle_name, puzzle_lines, puzzle_pieces) = &puzzles[current_puzzle];
-                    current_puzzle_piececnt_limit = game_piececnt + puzzle_pieces.len();
-                    state.consecutive_line_clears = 0;
-                    // Game message.
-                    feedback_events.push((
-                        state.game_time,
-                        Feedback::Message(if current_puzzle_attempt == 1 {
-                            format!(
-                                "Stage {}: {}",
-                                1 + current_puzzle,
-                                puzzle_name.to_ascii_uppercase()
-                            )
-                        } else {
-                            format!(
-                                "{}.RETRY ({})",
-                                current_puzzle_attempt - 1,
-                                puzzle_name.to_ascii_uppercase()
-                            )
-                        }),
-                    ));
-                    // Queue pieces and lines.
-                    state.next_pieces.clone_from(puzzle_pieces);
-                    // Additional piece for consistent end preview.
-                    state.next_pieces.push_back(Tetromino::I);
-                    // Load in pieces.
-                    for (puzzle_line, board_line) in puzzle_lines
-                        .iter()
-                        .rev()
-                        .map(|line| {
-                            line.map(|b| {
-                                if b == b' ' {
-                                    None
-                                } else {
-                                    Some(unsafe { NonZeroU32::new_unchecked(255) })
-                                }
+                    // Change puzzle number or repeat attempt.
+                    if puzzle_done {
+                        current_puzzle_level += 1;
+                        current_puzzle_attempt = 1;
+                    } else {
+                        current_puzzle_attempt += 1;
+                    }
+                    if current_puzzle_level == puzzles.len() + 1 {
+                        // Done with all puzzles, game completed.
+                        state.end = Some(Ok(()));
+                    } else {
+                        // Load in new puzzle.
+                        let (puzzle_name, puzzle_lines, puzzle_pieces) =
+                            &puzzles[current_puzzle_level - 1];
+                        current_puzzle_piececnt_limit = game_piececnt + puzzle_pieces.len();
+                        // Game message.
+                        feedback_events.push((
+                            state.time,
+                            Feedback::Message(if current_puzzle_attempt == 1 {
+                                format!(
+                                    "Stage {}: {}",
+                                    current_puzzle_level,
+                                    puzzle_name.to_ascii_uppercase()
+                                )
+                            } else {
+                                format!(
+                                    "{}.RETRY ({})",
+                                    current_puzzle_attempt - 1,
+                                    puzzle_name.to_ascii_uppercase()
+                                )
+                            }),
+                        ));
+                        // Queue pieces and lines.
+                        state.next_pieces.clone_from(puzzle_pieces);
+                        // Load in pieces.
+                        for (puzzle_line, board_line) in puzzle_lines
+                            .iter()
+                            .rev()
+                            .map(|line| {
+                                line.map(|b| {
+                                    if b == b' ' {
+                                        None
+                                    } else {
+                                        Some(unsafe { NonZeroU32::new_unchecked(255) })
+                                    }
+                                })
                             })
-                        })
-                        .chain(std::iter::repeat(Default::default()))
-                        .zip(state.board.iter_mut())
-                    {
-                        *board_line = puzzle_line;
+                            .chain(std::iter::repeat(Default::default()))
+                            .zip(state.board.iter_mut())
+                        {
+                            *board_line = puzzle_line;
+                        }
                     }
                 }
             }
-        }
-        config.preview_count = current_puzzle_piececnt_limit - game_piececnt;
-    };
+        };
     let mut game = Game::new(GameMode {
         name: "Puzzle".to_string(),
         start_level: NonZeroU32::MIN.saturating_add(1),
@@ -253,6 +258,7 @@ pub fn make_game() -> Game {
             ..Default::default()
         },
     });
+    game.config_mut().preview_count = 0;
     unsafe { game.add_modifier(Box::new(puzzle_modifier)) };
     game
 }
