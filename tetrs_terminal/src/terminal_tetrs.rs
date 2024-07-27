@@ -313,6 +313,23 @@ impl<T: Write> App<T> {
         )
     }
 
+    pub fn produce_header() -> io::Result<String> {
+        let pat = " ██ ▄▄▄▄ ▄█▀ ▀█▄ ▄█▄ ▄▄█ █▄▄";
+        let pat_len = pat.chars().count();
+        // eprintln!("{pat_len}");
+        // std::thread::sleep(Duration::from_secs(5));
+        let w_term = usize::from(terminal::size()?.0);
+        let at_least = w_term / pat_len + 1;
+        let mut rep_pat = pat.repeat(at_least);
+        let idx = rep_pat
+            .char_indices()
+            .map(|(i, _)| i)
+            .nth(w_term - 1)
+            .unwrap_or(rep_pat.len());
+        rep_pat.truncate(idx);
+        Ok(rep_pat)
+    }
+
     fn generic_placeholder_widget(
         &mut self,
         current_menu_name: &str,
@@ -999,6 +1016,8 @@ impl<T: Write> App<T> {
                         )
                     }
                 )))?
+                /*.queue(MoveTo(0, y_main + y_selection + 2))?
+                .queue(Print(Self::produce_header()?))?*/
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?
                 .queue(MoveTo(x_main, y_main + y_selection + 4))?
@@ -1694,8 +1713,9 @@ impl<T: Write> App<T> {
                                 // Sort desc by level.
                                 stats1.last_state.level.cmp(&stats2.last_state.level).reverse().then_with(||
                                     // Sort desc by score.
+
                                     stats1.last_state.score.cmp(&stats2.last_state.score).reverse()
-                                ).reverse()
+                                )
                             },
                             "40-Lines" => {
                                 // Sort desc by lines.
