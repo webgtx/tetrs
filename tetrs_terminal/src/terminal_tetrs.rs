@@ -209,9 +209,7 @@ impl<T: Write> App<T> {
         if let Some(game_fps) = fps {
             app.settings.game_fps = game_fps.into();
         }
-        if !kitty_enabled {
-            app.settings.no_soft_drop_lock = true;
-        }
+        app.settings.no_soft_drop_lock = !kitty_enabled;
         app
     }
 
