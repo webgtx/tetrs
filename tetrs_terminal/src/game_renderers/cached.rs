@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    fmt::Debug,
+    fmt::{Debug, Display},
     io::{self, Write},
     time::Duration,
 };
@@ -8,7 +8,7 @@ use std::{
 use crossterm::{
     cursor,
     event::KeyCode,
-    style::{Color, PrintStyledContent, Stylize},
+    style::{self, Color, Print, PrintStyledContent, Stylize},
     terminal, QueueableCommand,
 };
 use tetrs_engine::{
@@ -18,7 +18,10 @@ use tetrs_engine::{
 
 use crate::{
     game_renderers::GameScreenRenderer,
-    terminal_tetrs::{format_duration, format_key, format_keybinds, App, RunningGameStats},
+    terminal_tetrs::{
+        format_duration, format_key, format_keybinds, App, GraphicsColor, GraphicsStyle,
+        RunningGameStats,
+    },
 };
 
 #[derive(Clone, Default, Debug)]
@@ -29,25 +32,22 @@ struct ScreenBuf {
     y_draw: usize,
 }
 
-#[derive(Clone, Default, Debug)]
-pub struct Renderer {
-    screen: ScreenBuf,
-    visual_events: Vec<(GameTime, Feedback, bool)>,
-    messages: Vec<(GameTime, String)>,
-    hard_drop_tiles: Vec<(GameTime, Coord, usize, TileTypeID, bool)>,
-}
-
 impl ScreenBuf {
-    fn buf_from_strs(&mut self, base_screen: Vec<String>) {
+    fn buffer_reset(&mut self, (x, y): (usize, usize)) {
+        self.prev.clear();
+        (self.x_draw, self.y_draw) = (x, y);
+    }
+
+    fn buffer_from(&mut self, base_screen: Vec<String>) {
         self.next = base_screen
             .iter()
             .map(|str| str.chars().zip(std::iter::repeat(None)).collect())
             .collect();
     }
 
-    fn buf_str(&mut self, str: &str, fg_color: Option<Color>, (x, y): (usize, usize)) {
+    fn buffer_str(&mut self, str: &str, fg_color: Option<Color>, (x, y): (usize, usize)) {
         for (x_c, c) in str.chars().enumerate() {
-            // Lazy: just fill up until desired thing row exists.
+            // Lazy: just fill up until desired starting row and column exist.
             while y >= self.next.len() {
                 self.next.push(Vec::new());
             }
@@ -59,9 +59,28 @@ impl ScreenBuf {
         }
     }
 
-    fn buf_reset(&mut self, (x, y): (usize, usize)) {
-        self.prev.clear();
-        (self.x_draw, self.y_draw) = (x, y);
+    fn put(&self, term: &mut impl Write, c: char, x: usize, y: usize) -> io::Result<()> {
+        term.queue(cursor::MoveTo(
+            u16::try_from(self.x_draw + x).unwrap(),
+            u16::try_from(self.y_draw + y).unwrap(),
+        ))?
+        .queue(Print(c))?;
+        Ok(())
+    }
+
+    fn put_styled<D: Display>(
+        &self,
+        term: &mut impl Write,
+        content: style::StyledContent<D>,
+        x: usize,
+        y: usize,
+    ) -> io::Result<()> {
+        term.queue(cursor::MoveTo(
+            u16::try_from(self.x_draw + x).unwrap(),
+            u16::try_from(self.y_draw + y).unwrap(),
+        ))?
+        .queue(PrintStyledContent(content))?;
+        Ok(())
     }
 
     fn flush(&mut self, term: &mut impl Write) -> io::Result<()> {
@@ -71,47 +90,98 @@ impl ScreenBuf {
             // Redraw entire screen.
             term.queue(terminal::Clear(terminal::ClearType::All))?;
             for (y, line) in self.next.iter().enumerate() {
-                for (x, cell) in line.iter().enumerate() {
-                    self.put(term, cell, x, y)?;
+                for (x, (c, col)) in line.iter().enumerate() {
+                    if let Some(col) = col {
+                        self.put_styled(term, c.with(*col), x, y)?;
+                    } else {
+                        self.put(term, *c, x, y)?;
+                    }
                 }
             }
         } else {
-            // Compare two frames and only write differences.
-            for (y, (prev_line, next_line)) in self.prev.iter().zip(self.next.iter()).enumerate() {
-                for (x, (prev_cell, next_cell)) in
-                    prev_line.iter().zip(next_line.iter()).enumerate()
+            // Compare next to previous frames and only write differences.
+            for (y, (line_prev, line_next)) in self.prev.iter().zip(self.next.iter()).enumerate() {
+                // Overwrite common line characters.
+                for (x, (cell_prev @ (_c_prev, col_prev), cell_next @ (c_next, col_next))) in
+                    line_prev.iter().zip(line_next.iter()).enumerate()
                 {
-                    if next_cell != prev_cell {
-                        self.put(term, next_cell, x, y)?;
+                    // Relevant change occurred.
+                    if cell_prev != cell_next {
+                        // New color.
+                        if let Some(col) = col_next {
+                            self.put_styled(term, c_next.with(*col), x, y)?;
+                        // Previously colored but not anymore, explicit reset.
+                        } else if col_prev.is_some() && col_next.is_none() {
+                            self.put_styled(term, c_next.reset(), x, y)?;
+                        // Uncolored before and after, simple reprint.
+                        } else {
+                            self.put(term, *c_next, x, y)?;
+                        }
                     }
                 }
-                match prev_line.len().cmp(&next_line.len()) {
+                // Handle differences in line length.
+                match line_prev.len().cmp(&line_next.len()) {
+                    // Previously shorter, just write out new characters now.
                     Ordering::Less => {
-                        for (x, next_cell) in next_line.iter().enumerate().skip(prev_line.len()) {
-                            self.put(term, next_cell, x, y)?;
+                        for (x, (c_next, col_next)) in
+                            line_next.iter().enumerate().skip(line_prev.len())
+                        {
+                            // Write new colored char.
+                            if let Some(col) = col_next {
+                                self.put_styled(term, c_next.with(*col), x, y)?;
+                            // Write new uncolored char.
+                            } else {
+                                self.put(term, *c_next, x, y)?;
+                            }
                         }
                     }
                     Ordering::Equal => {}
+                    // Previously longer, delete new characters.
                     Ordering::Greater => {
-                        for x in next_line.len()..prev_line.len() {
-                            self.put(term, &(' ', None), x, y)?;
+                        for (x, (_c_prev, col_prev)) in
+                            line_prev.iter().enumerate().skip(line_next.len())
+                        {
+                            // Previously colored but now erased, explicit reset.
+                            if col_prev.is_some() {
+                                self.put_styled(term, ' '.reset(), x, y)?;
+                            // Otherwise simply erase previous character.
+                            } else {
+                                self.put(term, ' ', x, y)?;
+                            }
                         }
                     }
                 }
             }
+            // Handle differences in text height.
             match self.prev.len().cmp(&self.next.len()) {
+                // Previously shorter in height.
                 Ordering::Less => {
                     for (y, next_line) in self.next.iter().enumerate().skip(self.prev.len()) {
-                        for (x, next_cell) in next_line.iter().enumerate() {
-                            self.put(term, next_cell, x, y)?;
+                        // Write entire line.
+                        for (x, (c_next, col_next)) in next_line.iter().enumerate() {
+                            // Write new colored char.
+                            if let Some(col) = col_next {
+                                self.put_styled(term, c_next.with(*col), x, y)?;
+                            // Write new uncolored char.
+                            } else {
+                                self.put(term, *c_next, x, y)?;
+                            }
                         }
                     }
                 }
                 Ordering::Equal => {}
+                // Previously taller, delete excess lines.
                 Ordering::Greater => {
                     for (y, prev_line) in self.prev.iter().enumerate().skip(self.next.len()) {
-                        for (x, _) in prev_line.iter().enumerate() {
-                            self.put(term, &(' ', None), x, y)?;
+                        // Erase entire line.
+                        for (x, (_c_prev, col_prev)) in prev_line.iter().enumerate() {
+                            // Previously colored but now erased, explicit reset.
+                            if col_prev.is_some() {
+                                self.put_styled(term, ' '.reset(), x, y)?;
+                            // Otherwise simply erase previous character.
+                            } else {
+                                self.put(term, ' ', x, y)?;
+                            }
                         }
                     }
                 }
@@ -127,25 +197,14 @@ impl ScreenBuf {
         std::mem::swap(&mut self.prev, &mut self.next);
         Ok(())
     }
+}
 
-    fn put(
-        &self,
-        term: &mut impl Write,
-        (c, col): &(char, Option<Color>),
-        x: usize,
-        y: usize,
-    ) -> io::Result<()> {
-        term.queue(cursor::MoveTo(
-            u16::try_from(self.x_draw + x).unwrap(),
-            u16::try_from(self.y_draw + y).unwrap(),
-        ))?;
-        if let Some(color) = col {
-            term.queue(PrintStyledContent(c.with(*color)))?;
-        } else {
-            term.queue(PrintStyledContent(c.reset()))?;
-        }
-        Ok(())
-    }
+#[derive(Clone, Default, Debug)]
+pub struct Renderer {
+    screen: ScreenBuf,
+    visual_events: Vec<(GameTime, Feedback, bool)>,
+    messages: Vec<(GameTime, String)>,
+    hard_drop_tiles: Vec<(GameTime, Coord, usize, TileTypeID, bool)>,
 }
 
 impl GameScreenRenderer for Renderer {
@@ -164,7 +223,7 @@ impl GameScreenRenderer for Renderer {
         if screen_resized {
             let (x_main, y_main) = App::<T>::fetch_main_xy();
             self.screen
-                .buf_reset((usize::from(x_main), usize::from(y_main)));
+                .buffer_reset((usize::from(x_main), usize::from(y_main)));
         }
         let GameState {
             time: game_time,
@@ -274,8 +333,8 @@ impl GameScreenRenderer for Renderer {
         // Screen: draw.
         #[allow(clippy::useless_format)]
         #[rustfmt::skip]
-        let base_screen = if app.settings().ascii_graphics {
-            vec![
+        let base_screen = match app.settings().graphics_style {
+            GraphicsStyle::ASCII => vec![
                 format!("                                                            ", ),
                 format!("                       +- - - - - - - - - - +{:-^w$       }+", "mode", w=mode_name_space),
                 format!("   ALL STATS           |                    |{: ^w$       }|", mode_name, w=mode_name_space),
@@ -300,9 +359,8 @@ impl GameScreenRenderer for Renderer {
                 format!("   Drop    {:<12      }|                    |               ", key_icons_drop),
                 format!("   Pause   {:<9    }  ~#====================#~              ", key_icon_pause),
                 format!("                                                            ", ),
-            ]
-        } else {
-            vec![
+            ],
+        GraphicsStyle::Unicode => vec![
                 format!("                                                            ", ),
                 format!("                       ╓╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╥{:─^w$       }┐", "mode", w=mode_name_space),
                 format!("   ALL STATS           ║                    ║{: ^w$       }│", mode_name, w=mode_name_space),
@@ -327,31 +385,51 @@ impl GameScreenRenderer for Renderer {
                 format!("   Drop    {:<12      }║                    ║               ", key_icons_drop),
                 format!("   Pause   {:<9    }░▒▓█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█▓▒░            ", key_icon_pause),
                 format!("                                                            ", ),
-            ]
+            ],
         };
-        self.screen.buf_from_strs(base_screen);
+        self.screen.buffer_from(base_screen);
         let (x_board, y_board) = (24, 1);
         let (x_preview, y_preview) = (48, 12);
         let (x_messages, y_messages) = (47, 15);
         let pos_board = |(x, y)| (x_board + 2 * x, y_board + Game::SKYLINE - y);
         // Board: helpers.
         #[rustfmt::skip]
-        let tile_color = if app.settings().ascii_graphics {
-            |_tile: TileTypeID| None
-        } else {
-            |tile: TileTypeID| {
-                Some(match tile.get() {
-                      1 => Color::Rgb { r:254, g:203, b:  0 },
-                      2 => Color::Rgb { r:  0, g:159, b:218 },
-                      3 => Color::Rgb { r:105, g:190, b: 40 },
-                      4 => Color::Rgb { r:237, g: 41, b: 57 },
-                      5 => Color::Rgb { r:149, g: 45, b:152 },
-                      6 => Color::Rgb { r:255, g:121, b:  0 },
-                      7 => Color::Rgb { r:  0, g:101, b:189 },
-                    255 => Color::Rgb { r:127, g:127, b:127 },
-                    t => unimplemented!("formatting unknown tile id {t}"),
-                })
-            }
+        let tile_color = match app.settings().graphics_color {
+            GraphicsColor::Monochrome => {
+                |_tile: TileTypeID| None
+            },
+            GraphicsColor::Color16 => {
+                |tile: TileTypeID| {
+                    Some(match tile.get() {
+                        1 => Color::Yellow,
+                        2 => Color::DarkCyan,
+                        3 => Color::Green,
+                        4 => Color::DarkRed,
+                        5 => Color::DarkMagenta,
+                        6 => Color::Red,
+                        7 => Color::Blue,
+                        254 => Color::DarkGrey,
+                        255 => Color::Black,
+                        t => unimplemented!("formatting unknown tile id {t}"),
+                    })
+                }
+            },
+            GraphicsColor::ColorRGB => {
+                |tile: TileTypeID| {
+                    Some(match tile.get() {
+                        1 => Color::Rgb { r:254, g:203, b:  0 },
+                        2 => Color::Rgb { r:  0, g:159, b:218 },
+                        3 => Color::Rgb { r:105, g:190, b: 40 },
+                        4 => Color::Rgb { r:237, g: 41, b: 57 },
+                        5 => Color::Rgb { r:149, g: 45, b:152 },
+                        6 => Color::Rgb { r:255, g:121, b:  0 },
+                        7 => Color::Rgb { r:  0, g:101, b:189 },
+                        254 => Color::Rgb { r:127, g:127, b:127 },
+                        255 => Color::Rgb { r:  0, g:  0, b: 0 },
+                        t => unimplemented!("formatting unknown tile id {t}"),
+                    })
+                }
+            },
         };
         // Board: draw hard drop trail.
         for (event_time, pos, h, tile_type_id, relevant) in self.hard_drop_tiles.iter_mut() {
@@ -370,20 +448,20 @@ impl GameScreenRenderer for Renderer {
             // SAFETY: Valid ASCII bytes.
             let tile = String::from_utf8(vec![char, char]).unwrap();
             self.screen
-                .buf_str(&tile, tile_color(*tile_type_id), pos_board(*pos));
+                .buffer_str(&tile, tile_color(*tile_type_id), pos_board(*pos));
         }
         self.hard_drop_tiles.retain(|elt| elt.4);
         // Board: draw fixed tiles.
-        let (tile_fixed, tile_ghost, tile_active, tile_preview) = if app.settings().ascii_graphics {
-            ("##", "::", "[]", "[]")
-        } else {
-            ("██", "░░", "▓▓", "▒▒")
-        };
+        let (tile_fixed, tile_ghost, tile_active, tile_preview) =
+            match app.settings().graphics_style {
+                GraphicsStyle::ASCII => ("##", "::", "[]", "[]"),
+                GraphicsStyle::Unicode => ("██", "░░", "▓▓", "▒▒"),
+            };
         for (y, line) in board.iter().enumerate().take(21).rev() {
             for (x, cell) in line.iter().enumerate() {
                 if let Some(tile_type_id) = cell {
                     self.screen
-                        .buf_str(tile_fixed, tile_color(*tile_type_id), pos_board((x, y)));
+                        .buffer_str(tile_fixed, tile_color(*tile_type_id), pos_board((x, y)));
                 }
             }
         }
@@ -393,14 +471,14 @@ impl GameScreenRenderer for Renderer {
             for (tile_pos, tile_type_id) in active_piece.well_piece(board).tiles() {
                 if tile_pos.1 <= Game::SKYLINE {
                     self.screen
-                        .buf_str(tile_ghost, tile_color(tile_type_id), pos_board(tile_pos));
+                        .buffer_str(tile_ghost, tile_color(tile_type_id), pos_board(tile_pos));
                 }
             }
             // Draw active piece.
             for (tile_pos, tile_type_id) in active_piece.tiles() {
                 if tile_pos.1 <= Game::SKYLINE {
                     self.screen
-                        .buf_str(tile_active, tile_color(tile_type_id), pos_board(tile_pos));
+                        .buffer_str(tile_active, tile_color(tile_type_id), pos_board(tile_pos));
                 }
             }
         }
@@ -412,7 +490,7 @@ impl GameScreenRenderer for Renderer {
             let color = tile_color(next_piece.tiletypeid());
             for (x, y) in next_piece.minos(Orientation::N) {
                 let pos = (x_preview + 2 * x, y_preview - y);
-                self.screen.buf_str(tile_preview, color, pos);
+                self.screen.buffer_str(tile_preview, color, pos);
             }
         }
         // Update stored events.
@@ -427,26 +505,29 @@ impl GameScreenRenderer for Renderer {
             match event {
                 Feedback::PieceLocked(piece) => {
                     #[rustfmt::skip]
-                    let lock_anim = if app.settings().ascii_graphics {
-                        [
+                    let animation_locking = match app.settings().graphics_style {
+                        GraphicsStyle::ASCII => [
                             ( 50, "()"),
                             ( 75, "()"),
                             (100, "{}"),
                             (125, "{}"),
                             (150, "<>"),
                             (175, "<>"),
-                        ]
-                    } else {
-                        [
+                        ],
+                        GraphicsStyle::Unicode => [
                             ( 50, "██"),
                             ( 75, "▓▓"),
                             (100, "▒▒"),
                             (125, "░░"),
                             (150, "▒▒"),
                             (175, "▓▓"),
-                        ]
+                        ],
                     };
-                    let Some(tile) = lock_anim.iter().find_map(|(ms, tile)| {
+                    let color_locking = match app.settings().graphics_color {
+                        GraphicsColor::Monochrome => None,
+                        GraphicsColor::Color16 | GraphicsColor::ColorRGB => Some(Color::White),
+                    };
+                    let Some(tile) = animation_locking.iter().find_map(|(ms, tile)| {
                         (elapsed < Duration::from_millis(*ms)).then_some(tile)
                     }) else {
                         *relevant = false;
@@ -455,7 +536,7 @@ impl GameScreenRenderer for Renderer {
                     for (tile_pos, _tile_type_id) in piece.tiles() {
                         if tile_pos.1 <= Game::SKYLINE {
                             self.screen
-                                .buf_str(tile, Some(Color::White), pos_board(tile_pos));
+                                .buffer_str(tile, color_locking, pos_board(tile_pos));
                         }
                     }
                 }
@@ -464,8 +545,8 @@ impl GameScreenRenderer for Renderer {
                         *relevant = false;
                         continue;
                     }
-                    let line_clear_frames = if app.settings().ascii_graphics {
-                        [
+                    let animation_lineclear = match app.settings().graphics_style {
+                        GraphicsStyle::ASCII => [
                             "$$$$$$$$$$$$$$$$$$$$",
                             "$$$$$$$$$$$$$$$$$$$$",
                             "                    ",
@@ -476,9 +557,8 @@ impl GameScreenRenderer for Renderer {
                             "                    ",
                             "$$$$$$$$$$$$$$$$$$$$",
                             "$$$$$$$$$$$$$$$$$$$$",
-                        ]
-                    } else {
-                        [
+                        ],
+                        GraphicsStyle::Unicode => [
                             "████████████████████",
                             " ██████████████████ ",
                             "  ████████████████  ",
@@ -489,7 +569,11 @@ impl GameScreenRenderer for Renderer {
                             "       ██████       ",
                             "        ████        ",
                             "         ██         ",
-                        ]
+                        ],
+                    };
+                    let color_lineclear = match app.settings().graphics_color {
+                        GraphicsColor::Monochrome => None,
+                        GraphicsColor::Color16 | GraphicsColor::ColorRGB => Some(Color::White),
                     };
                     let percent = elapsed.as_secs_f64() / line_clear_delay.as_secs_f64();
                     // SAFETY: `0.0 <= percent && percent <= 1.0`.
@@ -502,7 +586,7 @@ impl GameScreenRenderer for Renderer {
                     for y_line in lines_cleared {
                         let pos = (x_board, y_board + Game::SKYLINE - *y_line);
                         self.screen
-                            .buf_str(line_clear_frames[idx], Some(Color::White), pos);
+                            .buffer_str(animation_lineclear[idx], color_lineclear, pos);
                     }
                 }
                 Feedback::HardDrop(_top_piece, bottom_piece) => {
@@ -588,7 +672,7 @@ impl GameScreenRenderer for Renderer {
         // Draw messages.
         for (y, (_event_time, message)) in self.messages.iter().rev().enumerate() {
             let pos = (x_messages, y_messages + y);
-            self.screen.buf_str(message, None, pos);
+            self.screen.buffer_str(message, None, pos);
         }
         self.messages.retain(|(timestamp, _message)| {
             game_time.saturating_sub(*timestamp) < Duration::from_millis(10000)

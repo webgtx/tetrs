@@ -236,7 +236,7 @@ pub fn make_game() -> Game {
                                     if b == b' ' {
                                         None
                                     } else {
-                                        Some(unsafe { NonZeroU32::new_unchecked(255) })
+                                        Some(unsafe { NonZeroU32::new_unchecked(254) })
                                     }
                                 })
                             })

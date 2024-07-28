@@ -27,16 +27,21 @@ pub fn display_tetromino_likelihood_mod(
         pieces_played_strs.sort_by_key(|&t| lg[t]);
         feedback_events.push((
             state.time,
-            Feedback::Message(pieces_played_strs
-                    .map(|t| format!(
-                        "{t:?}{}{}{}",
-                        lg[t],
-                        // "█".repeat(lg[t] as usize),
-                        "█".repeat((lg[t] * lg[t]) as usize / 8),
-                        [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"][(lg[t] * lg[t]) as usize % 8]
-                    )
-                    .to_ascii_lowercase())
-                    .join("").to_string()),
+            Feedback::Message(
+                pieces_played_strs
+                    .map(|t| {
+                        format!(
+                            "{t:?}{}{}{}",
+                            lg[t],
+                            // "█".repeat(lg[t] as usize),
+                            "█".repeat((lg[t] * lg[t]) as usize / 8),
+                            [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"][(lg[t] * lg[t]) as usize % 8]
+                        )
+                        .to_ascii_lowercase()
+                    })
+                    .join("")
+                    .to_string(),
+            ),
         ));
         // config.line_clear_delay = Duration::ZERO;
         // config.appearance_delay = Duration::ZERO;

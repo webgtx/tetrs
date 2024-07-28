@@ -92,6 +92,23 @@ enum MenuUpdate {
     Push(Menu),
 }
 
+#[derive(
+    Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
+pub enum GraphicsStyle {
+    ASCII,
+    Unicode,
+}
+
+#[derive(
+    Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
+pub enum GraphicsColor {
+    Monochrome,
+    Color16,
+    ColorRGB,
+}
+
 #[serde_with::serde_as]
 #[derive(PartialEq, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
@@ -99,7 +116,8 @@ pub struct Settings {
     pub keybinds: HashMap<KeyCode, Button>,
     pub game_fps: f64,
     pub show_fps: bool,
-    pub ascii_graphics: bool,
+    pub graphics_style: GraphicsStyle,
+    pub graphics_color: GraphicsColor,
     pub rotation_system: RotationSystem,
     pub no_soft_drop_lock: bool,
 }
@@ -188,7 +206,8 @@ impl<T: Write> App<T> {
                 keybinds: default_keybinds,
                 game_fps: 30.0,
                 show_fps: false,
-                ascii_graphics: false,
+                graphics_style: GraphicsStyle::Unicode,
+                graphics_color: GraphicsColor::ColorRGB,
                 rotation_system: RotationSystem::Ocular,
                 no_soft_drop_lock: !kitty_enabled,
             },
@@ -1165,7 +1184,7 @@ impl<T: Write> App<T> {
     }
 
     fn settings_menu(&mut self) -> io::Result<MenuUpdate> {
-        let selection_len = 6;
+        let selection_len = 7;
         let mut selected = 0usize;
         loop {
             let w_main = Self::W_MAIN.into();
@@ -1178,14 +1197,8 @@ impl<T: Write> App<T> {
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
             let labels = [
-                format!(
-                    "graphics : '{}'",
-                    if self.settings.ascii_graphics {
-                        "ASCII"
-                    } else {
-                        "Unicode"
-                    }
-                ),
+                format!("graphics : '{:?}'", self.settings.graphics_style),
+                format!("color : '{:?}'", self.settings.graphics_color),
                 format!("framerate : {}", self.settings.game_fps),
                 format!("show fps : {}", self.settings.show_fps),
                 format!("rotation system : '{:?}'", self.settings.rotation_system),
@@ -1272,25 +1285,35 @@ impl<T: Write> App<T> {
                     ..
                 }) => match selected {
                     0 => {
-                        self.settings.ascii_graphics = !self.settings.ascii_graphics;
+                        self.settings.graphics_style = match self.settings.graphics_style {
+                            GraphicsStyle::ASCII => GraphicsStyle::Unicode,
+                            GraphicsStyle::Unicode => GraphicsStyle::ASCII,
+                        };
                     }
                     1 => {
-                        self.settings.game_fps += 1.0;
+                        self.settings.graphics_color = match self.settings.graphics_color {
+                            GraphicsColor::Monochrome => GraphicsColor::Color16,
+                            GraphicsColor::Color16 => GraphicsColor::ColorRGB,
+                            GraphicsColor::ColorRGB => GraphicsColor::Monochrome,
+                        };
                     }
                     2 => {
-                        self.settings.show_fps = !self.settings.show_fps;
+                        self.settings.game_fps += 1.0;
                     }
                     3 => {
+                        self.settings.show_fps = !self.settings.show_fps;
+                    }
+                    4 => {
                         self.settings.rotation_system = match self.settings.rotation_system {
                             RotationSystem::Ocular => RotationSystem::Classic,
                             RotationSystem::Classic => RotationSystem::Super,
                             RotationSystem::Super => RotationSystem::Ocular,
                         }
                     }
-                    4 => {
+                    5 => {
                         self.settings.no_soft_drop_lock = !self.settings.no_soft_drop_lock;
                     }
-                    5 => {}
+                    6 => {}
                     _ => unreachable!(),
                 },
                 Event::Key(KeyEvent {
@@ -1299,25 +1322,35 @@ impl<T: Write> App<T> {
                     ..
                 }) => match selected {
                     0 => {
-                        self.settings.ascii_graphics = !self.settings.ascii_graphics;
+                        self.settings.graphics_style = match self.settings.graphics_style {
+                            GraphicsStyle::ASCII => GraphicsStyle::Unicode,
+                            GraphicsStyle::Unicode => GraphicsStyle::ASCII,
+                        };
                     }
-                    1 if self.settings.game_fps >= 1.0 => {
+                    1 => {
+                        self.settings.graphics_color = match self.settings.graphics_color {
+                            GraphicsColor::Monochrome => GraphicsColor::ColorRGB,
+                            GraphicsColor::Color16 => GraphicsColor::Monochrome,
+                            GraphicsColor::ColorRGB => GraphicsColor::Color16,
+                        };
+                    }
+                    2 if self.settings.game_fps >= 1.0 => {
                         self.settings.game_fps -= 1.0;
                     }
-                    2 => {
+                    3 => {
                         self.settings.show_fps = !self.settings.show_fps;
                     }
-                    3 => {
+                    4 => {
                         self.settings.rotation_system = match self.settings.rotation_system {
                             RotationSystem::Ocular => RotationSystem::Super,
                             RotationSystem::Classic => RotationSystem::Ocular,
                             RotationSystem::Super => RotationSystem::Classic,
                         };
                     }
-                    4 => {
+                    5 => {
                         self.settings.no_soft_drop_lock = !self.settings.no_soft_drop_lock;
                     }
-                    5 => {}
+                    6 => {}
                     _ => unreachable!(),
                 },
                 // Other event: don't care.
