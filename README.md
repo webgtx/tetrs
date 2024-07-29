@@ -90,41 +90,45 @@
 For more technical details see [Features of the Tetrs Engine](#features-of-the-tetrs-engine).
   
 ### Settings
-- Graphics (ASCII, Unicode).
-- Coloring (Monochrome; full RGB Colors; 16 Colors (should work on all consoles)).
-- Adjustable render rate and toggleable FPS counter.
-- Rotation systems: *Ocular*, *Classic* and *Super*.
-- Configurable controls.
-  <details>
-- **Keep Savefile**: By default this program won't store anything and just let you play the game. If you **do** want `tetrs_terminal` to restore your settings and past games in the future then make sure this is toggled **on**!
-  
-  <summary> Default Game Controls </summary>
-  
-  | Key | Action |
-  | -: | :-: |
-  | `←` | Move left |
-  | `→` | Move right |
-  | `A` | Rotate left |
-  | `D` | Rotate right |
-  | (not set) | Rotate around (180°) |
-  | `↓` | Soft drop |
-  | `↑` | Hard drop |
-  | `Esc` | Pause game |
-  | `Ctrl`+`D` | Forfeit game |
-  | `Ctrl`+`C` | Exit program |
-  
-   </details>
-- (*Advanced:* "No soft drop lock" enables soft drop not instantly locking pieces on ground even if keyboard enhancements are off, for better experience on typical consoles.)
+- Look of the game:
+  - Graphics (ASCII, Unicode).
+  - Coloring (Monochrome; full RGB Colors; 16 Colors (should work on all consoles)).
+- Play of the game:
+  - Configurable controls.
+    <details>
+    
+    <summary> Default Game Controls </summary>
+    
+    | Key | Action |
+    | -: | :-: |
+    | `←` | Move left |
+    | `→` | Move right |
+    | `A` | Rotate left |
+    | `D` | Rotate right |
+    | (not set) | Rotate around (180°) |
+    | `↓` | Soft drop |
+    | `↑` | Hard drop |
+    | `Esc` | Pause game |
+    | `Ctrl`+`D` | Forfeit game |
+    | `Ctrl`+`C` | Exit program |
+    
+    </details>
+  - Adjustable render rate and toggleable FPS counter.
+  - Rotation systems: *Ocular*, *Classic* and *Super*.
+  - *(Advanced)* "No soft drop lock": Enables soft drop not instantly locking pieces on ground even if keyboard enhancements are off, for better experience on typical consoles (soft drops for piece spins).
+- **Keep Savefile**: By default this program won't store anything and just let you play the game. If you **do** want `tetrs_terminal` to restore your settings and past games in the future then make sure this is set to **"On"**!
   
 ### Scoreboard
-- History of games played in the past.
+- History of games played in the current session (/in the past, if "Keep savefile" is turned on).
 - *(\*Games where 0 lines have been cleared are auto-deleted upon exit.)*
 
-> [!TIP]
-> If the "Keep savefile for tetrs" setting is toggled **on** then your settings and game history will be stored as a `.tetrs_terminal.json` in a location that tries to follow OS convention:
+> [!NOTE]
+> If "Keep savefile for tetrs" is turned on then your settings and games will be stored in `.tetrs_terminal.json` under a directory that tries to follow OS conventions:
 > | | Windows | Linux | macOS | other |
-> | location | `%APPDATA%` | `~/.config/` | `~/Library/Application Support/` | `~/` |
-> (If this location fails it tries to store it locally (`./`)!)
+> | -: | - | - | - | - |
+> | location | `%APPDATA%` | `~/.config/` | `~/Library/Application Support/` | (home directory) |
+> 
+> (If this fails it tries to store it locally (`./`)!)
 
 
 # Features of the Tetrs Engine
@@ -505,6 +509,7 @@ On the Rust side of things I learned about;
 - using [serde](https://serde.rs/derive.html) a little for a hacky way to [save some structured data locally](https://stackoverflow.com/questions/62771576/how-do-i-save-structured-data-to-file),
 - [conditionally derive](https://stackoverflow.com/questions/42046327/conditionally-derive-based-on-feature-flag) feature flags & `cargo check --features serde`,
 - [conditionally compile](https://doc.rust-lang.org/reference/conditional-compilation.html),
+- basic [file system](https://doc.rust-lang.org/std/fs/index.html) shenanigans,
 - [clap](https://docs.rs/clap/latest/clap/) to parse simple command line arguments & `cargo run -- --fps=60`,
 - [formatting](https://docs.rs/chrono/latest/chrono/struct.DateTime.html#method.format) the time with [chrono](https://rust-lang-nursery.github.io/rust-cookbook/datetime/parse.html#display-formatted-date-and-time) my favourite way,
 - the `format!` macro (which I discovered is the analogue to Python's f-strings my beloved),
