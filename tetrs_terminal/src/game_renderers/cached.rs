@@ -416,7 +416,9 @@ impl GameScreenRenderer for Renderer {
         self.screen.buffer_from(base_screen);
         let (x_board, y_board) = (24, 1);
         let (x_preview, y_preview) = (48, 12);
-        let (x_messages, y_messages) = (47, 15);
+        let (x_preview_small, y_preview_small) = (48, 14);
+        let (x_preview_minuscule, y_preview_minuscule) = (48, 15);
+        let (x_messages, y_messages) = (47, 17);
         let pos_board = |(x, y)| (x_board + 2 * x, y_board + Game::SKYLINE - y);
         // Board: helpers.
         #[rustfmt::skip]
@@ -523,14 +525,55 @@ impl GameScreenRenderer for Renderer {
         }
         // Draw preview.
         // TODO: Possibly implement more preview.
-        if game.config().preview_count > 0 {
-            // SAFETY: `preview_count > 0`.
-            let next_piece = next_pieces.front().unwrap();
+        if let Some(next_piece) = next_pieces.front() {
             let color = tile_color(next_piece.tiletypeid());
             for (x, y) in next_piece.minos(Orientation::N) {
                 let pos = (x_preview + 2 * x, y_preview - y);
                 self.screen.buffer_str(tile_preview, color, pos);
             }
+        }
+        // Draw small preview pieces 2,3,4.
+        let preview_small = |t: &Tetromino| match t {
+            Tetromino::O => "██",
+            Tetromino::I => "▄▄▄▄",
+            Tetromino::S => "▄█▀",
+            Tetromino::Z => "▀█▄",
+            Tetromino::T => "▄█▄",
+            Tetromino::L => "▄▄█",
+            Tetromino::J => "█▄▄",
+        };
+        let mut x_offset_small = 0;
+        for tet in next_pieces.iter().skip(1).take(3) {
+            let str = preview_small(tet);
+            self.screen.buffer_str(
+                str,
+                tile_color(tet.tiletypeid()),
+                (x_preview_small + x_offset_small, y_preview_small),
+            );
+            x_offset_small += str.chars().count() + 1;
+        }
+        // Draw minuscule preview pieces 5,6,7,8.
+        let preview_minuscule = |t: &Tetromino| match t {
+            Tetromino::O => "⠶",
+            Tetromino::I => "⠤⠤",
+            Tetromino::S => "⠴⠂",
+            Tetromino::Z => "⠲⠄",
+            Tetromino::T => "⠴⠄",
+            Tetromino::L => "⠤⠆",
+            Tetromino::J => "⠦⠄",
+        };
+        let mut x_offset_minuscule = 0;
+        for tet in next_pieces.iter().skip(4).take(5) {
+            let str = preview_minuscule(tet);
+            self.screen.buffer_str(
+                str,
+                tile_color(tet.tiletypeid()),
+                (
+                    x_preview_minuscule + x_offset_minuscule,
+                    y_preview_minuscule,
+                ),
+            );
+            x_offset_minuscule += str.chars().count() + 1;
         }
         // Update stored events.
         self.visual_events.extend(
