@@ -98,6 +98,7 @@ enum MenuUpdate {
     Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, serde::Serialize, serde::Deserialize,
 )]
 pub enum GraphicsStyle {
+    Electronika60,
     ASCII,
     Unicode,
 }
@@ -1329,8 +1330,9 @@ impl<T: Write> App<T> {
                 }) => match selected {
                     1 => {
                         self.settings.graphics_style = match self.settings.graphics_style {
+                            GraphicsStyle::Electronika60 => GraphicsStyle::ASCII,
                             GraphicsStyle::ASCII => GraphicsStyle::Unicode,
-                            GraphicsStyle::Unicode => GraphicsStyle::ASCII,
+                            GraphicsStyle::Unicode => GraphicsStyle::Electronika60,
                         };
                     }
                     2 => {
@@ -1368,7 +1370,8 @@ impl<T: Write> App<T> {
                 }) => match selected {
                     1 => {
                         self.settings.graphics_style = match self.settings.graphics_style {
-                            GraphicsStyle::ASCII => GraphicsStyle::Unicode,
+                            GraphicsStyle::Electronika60 => GraphicsStyle::Unicode,
+                            GraphicsStyle::ASCII => GraphicsStyle::Electronika60,
                             GraphicsStyle::Unicode => GraphicsStyle::ASCII,
                         };
                     }

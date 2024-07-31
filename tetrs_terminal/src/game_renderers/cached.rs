@@ -334,15 +334,41 @@ impl GameScreenRenderer for Renderer {
         #[allow(clippy::useless_format)]
         #[rustfmt::skip]
         let base_screen = match app.settings().graphics_style {
+            GraphicsStyle::Electronika60 => vec![
+                format!("                                                            ", ),
+                format!("                                              {: ^w$      } ", "mode", w=mode_name_space),
+                format!("   ALL STATS          <! . . . . . . . . . .!>{: ^w$      } ", mode_name, w=mode_name_space),
+                format!("   ----------         <! . . . . . . . . . .!>{: ^w$      } ", "", w=mode_name_space),
+                format!("   Level: {:<12      }<! . . . . . . . . . .!>  {          }", level, goal_name),
+                format!("   Score: {:<12      }<! . . . . . . . . . .!>{:^14        }", score, goal_value),
+                format!("   Lines: {:<12      }<! . . . . . . . . . .!>              ", lines_cleared),
+                format!("                      <! . . . . . . . . . .!>  {          }", focus_name),
+                format!("   Time elapsed       <! . . . . . . . . . .!>{:^14        }", focus_value),
+                format!("    {:<18            }<! . . . . . . . . . .!>              ", format_duration(*game_time)),
+                format!("                      <! . . . . . . . . . .!>              ", ),
+                format!("   PIECES             <! . . . . . . . . . .!>              ", ),
+                format!("   -------            <! . . . . . . . . . .!>              ", ),
+                format!("   {:<19             }<! . . . . . . . . . .!>              ", piececnts_o),
+                format!("   {:<19             }<! . . . . . . . . . .!>              ", piececnts_i_s_z),
+                format!("   {:<19             }<! . . . . . . . . . .!>              ", piececnts_t_l_j),
+                format!("                      <! . . . . . . . . . .!>              ", ),
+                format!("   CONTROLS           <! . . . . . . . . . .!>              ", ),
+                format!("   ---------          <! . . . . . . . . . .!>              ", ),
+                format!("   Move    {:<11     }<! . . . . . . . . . .!>              ", key_icons_move),
+                format!("   Rotate  {:<11     }<! . . . . . . . . . .!>              ", key_icons_rotate),
+                format!("   Drop    {:<11     }<! . . . . . . . . . .!>              ", key_icons_drop),
+                format!("   Pause   {:<8    }  <!====================!>              ", key_icon_pause),
+               format!(r"                        \/\/\/\/\/\/\/\/\/\/                ", ),
+            ],
             GraphicsStyle::ASCII => vec![
                 format!("                                                            ", ),
                 format!("                       +- - - - - - - - - - +{:-^w$       }+", "mode", w=mode_name_space),
                 format!("   ALL STATS           |                    |{: ^w$       }|", mode_name, w=mode_name_space),
                 format!("   ----------          |                    +{:-^w$       }+", "", w=mode_name_space),
-                format!("   Level: {:<13       }|                    |  {          }:", level, goal_name),
+                format!("   Level: {:<13       }|                    |  {           }", level, goal_name),
                 format!("   Score: {:<13       }|                    |{:^15         }", score, goal_value),
                 format!("   Lines: {:<13       }|                    |               ", lines_cleared),
-                format!("                       |                    |  {          }:", focus_name),
+                format!("                       |                    |  {           }", focus_name),
                 format!("   Time elapsed        |                    |{:^15         }", focus_value),
                 format!("    {:<19             }|                    |               ", format_duration(*game_time)),
                 format!("                       |                    |-----next-----+", ),
@@ -434,9 +460,12 @@ impl GameScreenRenderer for Renderer {
         // Board: draw hard drop trail.
         for (event_time, pos, h, tile_type_id, relevant) in self.hard_drop_tiles.iter_mut() {
             let elapsed = game_time.saturating_sub(*event_time);
-            let luminance_map = "@$#%*+~.".as_bytes();
+            let luminance_map = match app.settings().graphics_style {
+                GraphicsStyle::Electronika60 => [" .", " .", " .", " .", " .", " .", " .", " ."],
+                GraphicsStyle::ASCII | GraphicsStyle::Unicode => ["@@", "$$", "##", "%%", "**", "++", "~~", ".."],
+            };
             // let Some(&char) = [50, 60, 70, 80, 90, 110, 140, 180]
-            let Some(&char) = [50, 70, 90, 110, 130, 150, 180, 240]
+            let Some(tile) = [50, 70, 90, 110, 130, 150, 180, 240]
                 .iter()
                 .enumerate()
                 .find_map(|(idx, ms)| (elapsed < Duration::from_millis(*ms)).then_some(idx))
@@ -445,15 +474,14 @@ impl GameScreenRenderer for Renderer {
                 *relevant = false;
                 continue;
             };
-            // SAFETY: Valid ASCII bytes.
-            let tile = String::from_utf8(vec![char, char]).unwrap();
             self.screen
-                .buffer_str(&tile, tile_color(*tile_type_id), pos_board(*pos));
+                .buffer_str(tile, tile_color(*tile_type_id), pos_board(*pos));
         }
         self.hard_drop_tiles.retain(|elt| elt.4);
         // Board: draw fixed tiles.
         let (tile_fixed, tile_ghost, tile_active, tile_preview) =
             match app.settings().graphics_style {
+                GraphicsStyle::Electronika60 => ("▮▮", " .", "▮▮", "▮▮"),
                 GraphicsStyle::ASCII => ("##", "::", "[]", "[]"),
                 GraphicsStyle::Unicode => ("██", "░░", "▓▓", "▒▒"),
             };
@@ -515,6 +543,14 @@ impl GameScreenRenderer for Renderer {
                 Feedback::PieceLocked(piece) => {
                     #[rustfmt::skip]
                     let animation_locking = match app.settings().graphics_style {
+                        GraphicsStyle::Electronika60 => [
+                            ( 50, "▮▮"),
+                            ( 75, "▮▮"),
+                            (100, "▮▮"),
+                            (125, "▮▮"),
+                            (150, "▮▮"),
+                            (175, "▮▮"),
+                        ],
                         GraphicsStyle::ASCII => [
                             ( 50, "()"),
                             ( 75, "()"),
@@ -555,6 +591,18 @@ impl GameScreenRenderer for Renderer {
                         continue;
                     }
                     let animation_lineclear = match app.settings().graphics_style {
+                        GraphicsStyle::Electronika60 => [
+                            "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮",
+                            "  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮",
+                            "    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮",
+                            "      ▮▮▮▮▮▮▮▮▮▮▮▮▮▮",
+                            "        ▮▮▮▮▮▮▮▮▮▮▮▮",
+                            "          ▮▮▮▮▮▮▮▮▮▮",
+                            "            ▮▮▮▮▮▮▮▮",
+                            "              ▮▮▮▮▮▮",
+                            "                ▮▮▮▮",
+                            "                  ▮▮",
+                        ],
                         GraphicsStyle::ASCII => [
                             "$$$$$$$$$$$$$$$$$$$$",
                             "$$$$$$$$$$$$$$$$$$$$",
