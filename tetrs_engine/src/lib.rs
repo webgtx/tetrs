@@ -13,7 +13,7 @@ use rand::rngs::ThreadRng;
 pub use rotation_systems::RotationSystem;
 pub use tetromino_generators::TetrominoGenerator;
 
-pub type ButtonsPressed = [bool; 7];
+pub type ButtonsPressed = [bool; 8];
 // NOTE: Would've liked to use `impl Game { type Board = ...` (https://github.com/rust-lang/rust/issues/8995)
 pub type TileTypeID = NonZeroU32;
 pub type Line = [Option<TileTypeID>; Game::WIDTH];
@@ -43,6 +43,7 @@ pub enum Button {
     RotateAround,
     DropSoft,
     DropHard,
+    DropSonic,
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
@@ -126,6 +127,7 @@ pub enum InternalEvent {
     Spawn,
     Lock,
     HardDrop,
+    SonicDrop,
     SoftDrop,
     Fall,
     MoveSlow,
@@ -442,7 +444,7 @@ impl GameMode {
     }
 }
 
-impl<T> ops::Index<Button> for [T; 7] {
+impl<T> ops::Index<Button> for [T; 8] {
     type Output = T;
 
     fn index(&self, idx: Button) -> &Self::Output {
@@ -454,11 +456,12 @@ impl<T> ops::Index<Button> for [T; 7] {
             Button::RotateAround => &self[4],
             Button::DropSoft => &self[5],
             Button::DropHard => &self[6],
+            Button::DropSonic => &self[7],
         }
     }
 }
 
-impl<T> ops::IndexMut<Button> for [T; 7] {
+impl<T> ops::IndexMut<Button> for [T; 8] {
     fn index_mut(&mut self, idx: Button) -> &mut Self::Output {
         match idx {
             Button::MoveLeft => &mut self[0],
@@ -468,6 +471,7 @@ impl<T> ops::IndexMut<Button> for [T; 7] {
             Button::RotateAround => &mut self[4],
             Button::DropSoft => &mut self[5],
             Button::DropHard => &mut self[6],
+            Button::DropSonic => &mut self[7],
         }
     }
 }
@@ -704,9 +708,9 @@ impl Game {
         update_time: GameTime,
     ) {
         #[allow(non_snake_case)]
-        let [mL0, mR0, rL0, rR0, rA0, dS0, dH0] = self.state.buttons_pressed;
+        let [mL0, mR0, rL0, rR0, rA0, dS0, dH0, dC0] = self.state.buttons_pressed;
         #[allow(non_snake_case)]
-        let [mL1, mR1, rL1, rR1, rA1, dS1, dH1] = next_buttons_pressed;
+        let [mL1, mR1, rL1, rR1, rA1, dS1, dH1, dC1] = next_buttons_pressed;
         /*
         Table:                                 Karnaugh map:
         | mL0 mR0 mL1 mR1                      |           !mL1 !mL1  mL1  mL1
@@ -767,8 +771,13 @@ impl Game {
         // Soft drop button pressed.
         if !dS0 && dS1 {
             self.state.events.insert(InternalEvent::SoftDrop, update_time);
+        // Soft drop button released: Reset fall timer.
         } else if dS0 && !dS1 {
             self.state.events.insert(InternalEvent::Fall, update_time + Self::drop_delay(&self.state.level));
+        }
+        // Sonic drop button pressed
+        if !dC0 && dC1 {
+            self.state.events.insert(InternalEvent::SonicDrop, update_time);
         }
         // Hard drop button pressed.
         if !dH0 && dH1 {
@@ -916,6 +925,11 @@ impl Game {
                     }
                     Some(prev_piece)
                 } 
+            }
+            InternalEvent::SonicDrop => {
+                let prev_piece = prev_piece.expect("sonicdrop event but no active piece");
+                // Move piece all the way down and nothing more.
+                Some(prev_piece.well_piece(&self.state.board))
             }
             InternalEvent::HardDrop => {
                 let prev_piece = prev_piece.expect("harddrop event but no active piece");

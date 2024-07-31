@@ -1418,6 +1418,7 @@ impl<T: Write> App<T> {
             Button::RotateAround,
             Button::DropSoft,
             Button::DropHard,
+            Button::DropSonic,
         ];
         let selection_len = button_selection.len() + 1;
         let mut selected = 0usize;
