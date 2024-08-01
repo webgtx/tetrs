@@ -144,19 +144,19 @@ pub enum Stat {
 #[derive(
     Eq, PartialEq, Ord, PartialOrd, Clone, Hash, Debug, serde::Serialize, serde::Deserialize,
 )]
-pub struct CustomModeSettings {
+pub struct CustomModeStore {
     name: String,
     start_level: NonZeroU32,
     increment_level: bool,
     mode_limit: Option<Stat>,
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct App<T: Write> {
     pub term: T,
     kitty_enabled: bool,
     settings: Settings,
-    custom_mode_settings: CustomModeSettings,
+    custom_mode: CustomModeStore,
     game_config: GameConfig,
     past_games: Vec<FinishedGameStats>,
 }
@@ -220,7 +220,7 @@ impl<T: Write> App<T> {
                 graphics_color: GraphicsColor::ColorRGB,
                 save_data_on_exit: false,
             },
-            custom_mode_settings: CustomModeSettings {
+            custom_mode: CustomModeStore {
                 name: "Custom Mode".to_string(),
                 start_level: NonZeroU32::MIN,
                 increment_level: true,
@@ -283,7 +283,12 @@ impl<T: Write> App<T> {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let save_state = (&self.settings, &self.custom_mode_settings, &self.past_games);
+        let save_state = (
+            &self.settings,
+            &self.custom_mode,
+            &self.game_config,
+            &self.past_games,
+        );
         let save_str = serde_json::to_string(&save_state)?;
         let mut file = File::create(path)?;
         // TODO: Handle error?
@@ -295,8 +300,12 @@ impl<T: Write> App<T> {
         let mut file = File::open(Self::savefile_path())?;
         let mut save_str = String::new();
         file.read_to_string(&mut save_str)?;
-        (self.settings, self.custom_mode_settings, self.past_games) =
-            serde_json::from_str(&save_str)?;
+        (
+            self.settings,
+            self.custom_mode,
+            self.game_config,
+            self.past_games,
+        ) = serde_json::from_str(&save_str)?;
         Ok(())
     }
 
@@ -596,12 +605,9 @@ impl<T: Write> App<T> {
             // Render custom mode stuff.
             if selected == selected_cnt - 1 {
                 let stats_strs = [
-                    format!("* level start: {}", self.custom_mode_settings.start_level),
-                    format!(
-                        "* level increment: {}",
-                        self.custom_mode_settings.increment_level
-                    ),
-                    format!("* limit: {:?}", self.custom_mode_settings.mode_limit),
+                    format!("* level start: {}", self.custom_mode.start_level),
+                    format!("* level increment: {}", self.custom_mode.increment_level),
+                    format!("* limit: {:?}", self.custom_mode.mode_limit),
                 ];
                 for (j, stat_str) in stats_strs.into_iter().enumerate() {
                     self.term
@@ -643,12 +649,12 @@ impl<T: Write> App<T> {
                     ..
                 }) => {
                     let mut game = if selected == selected_cnt - 1 {
-                        let CustomModeSettings {
+                        let CustomModeStore {
                             name,
                             start_level,
                             increment_level,
                             mode_limit: custom_mode_limit,
-                        } = self.custom_mode_settings.clone();
+                        } = self.custom_mode.clone();
                         let limits = match custom_mode_limit {
                             Some(Stat::Time(max_dur)) => Limits {
                                 time: Some((true, max_dur)),
@@ -714,17 +720,15 @@ impl<T: Write> App<T> {
                     if selected_custom > 0 {
                         match selected_custom {
                             1 => {
-                                self.custom_mode_settings.start_level = self
-                                    .custom_mode_settings
-                                    .start_level
-                                    .saturating_add(d_level);
+                                self.custom_mode.start_level =
+                                    self.custom_mode.start_level.saturating_add(d_level);
                             }
                             2 => {
-                                self.custom_mode_settings.increment_level =
-                                    !self.custom_mode_settings.increment_level;
+                                self.custom_mode.increment_level =
+                                    !self.custom_mode.increment_level;
                             }
                             3 => {
-                                match self.custom_mode_settings.mode_limit {
+                                match self.custom_mode.mode_limit {
                                     Some(Stat::Time(ref mut dur)) => {
                                         *dur += d_time;
                                     }
@@ -759,17 +763,17 @@ impl<T: Write> App<T> {
                     if selected_custom > 0 {
                         match selected_custom {
                             1 => {
-                                self.custom_mode_settings.start_level = NonZeroU32::try_from(
-                                    self.custom_mode_settings.start_level.get() - d_level,
+                                self.custom_mode.start_level = NonZeroU32::try_from(
+                                    self.custom_mode.start_level.get() - d_level,
                                 )
                                 .unwrap_or(NonZeroU32::MIN);
                             }
                             2 => {
-                                self.custom_mode_settings.increment_level =
-                                    !self.custom_mode_settings.increment_level;
+                                self.custom_mode.increment_level =
+                                    !self.custom_mode.increment_level;
                             }
                             3 => {
-                                match self.custom_mode_settings.mode_limit {
+                                match self.custom_mode.mode_limit {
                                     Some(Stat::Time(ref mut dur)) => {
                                         *dur = dur.saturating_sub(d_time);
                                     }
@@ -816,17 +820,16 @@ impl<T: Write> App<T> {
                     if selected == selected_cnt - 1 {
                         // If reached last stat, cycle through stats for limit.
                         if selected_custom == selected_custom_cnt - 1 {
-                            self.custom_mode_settings.mode_limit =
-                                match self.custom_mode_settings.mode_limit {
-                                    Some(Stat::Time(_)) => Some(Stat::Score(9000)),
-                                    Some(Stat::Score(_)) => Some(Stat::Pieces(100)),
-                                    Some(Stat::Pieces(_)) => Some(Stat::Lines(40)),
-                                    Some(Stat::Lines(_)) => {
-                                        Some(Stat::Level(NonZeroU32::try_from(25).unwrap()))
-                                    }
-                                    Some(Stat::Level(_)) => None,
-                                    None => Some(Stat::Time(Duration::from_secs(120))),
-                                };
+                            self.custom_mode.mode_limit = match self.custom_mode.mode_limit {
+                                Some(Stat::Time(_)) => Some(Stat::Score(9000)),
+                                Some(Stat::Score(_)) => Some(Stat::Pieces(100)),
+                                Some(Stat::Pieces(_)) => Some(Stat::Lines(40)),
+                                Some(Stat::Lines(_)) => {
+                                    Some(Stat::Level(NonZeroU32::try_from(25).unwrap()))
+                                }
+                                Some(Stat::Level(_)) => None,
+                                None => Some(Stat::Time(Duration::from_secs(120))),
+                            };
                         } else {
                             selected_custom += 1
                         }
@@ -1532,7 +1535,7 @@ impl<T: Write> App<T> {
                 .queue(MoveTo(x_main, y_main + y_selection))?
                 .queue(Print(format!(
                     "{:^w_main$}",
-                    "& Configure Game (requires new game) &"
+                    "= Configure Game (->applied on new game) ="
                 )))?
                 .queue(MoveTo(x_main, y_main + y_selection + 2))?
                 .queue(Print(format!("{:^w_main$}", "──────────────────────────")))?;
@@ -1549,20 +1552,20 @@ impl<T: Write> App<T> {
                 ),
                 format!("preview count : {}", self.game_config.preview_count),
                 format!(
-                    "delayed auto shift** : {:?}",
+                    "**delayed auto shift : {:?}",
                     self.game_config.delayed_auto_shift
                 ),
                 format!(
-                    "auto repeat rate** : {:?}",
+                    "**auto repeat rate : {:?}",
                     self.game_config.auto_repeat_rate
                 ),
-                format!("soft drop factor** : {}", self.game_config.soft_drop_factor),
+                format!("**soft drop factor : {}", self.game_config.soft_drop_factor),
                 format!("hard drop delay : {:?}", self.game_config.hard_drop_delay),
                 format!("ground time max : {:?}", self.game_config.ground_time_max),
                 format!("line clear delay : {:?}", self.game_config.line_clear_delay),
                 format!("appearance delay : {:?}", self.game_config.appearance_delay),
                 format!(
-                    "no soft drop lock* : {}",
+                    "*no soft drop lock : {}",
                     self.game_config.no_soft_drop_lock
                 ),
             ];

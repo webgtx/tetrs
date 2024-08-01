@@ -98,7 +98,7 @@ pub struct GameMode {
     pub limits: Limits,
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameConfig {
     pub rotation_system: RotationSystem,
@@ -520,8 +520,7 @@ impl Game {
         Self::with_config(gamemode, GameConfig::default())
     }
 
-    pub fn with_config(gamemode: GameMode, mut config: GameConfig) -> Self {
-        let mut rng = rand::thread_rng();
+    pub fn with_config(gamemode: GameMode, config: GameConfig) -> Self {
         let state = GameState {
             time: Duration::ZERO,
             end: None,
@@ -531,11 +530,7 @@ impl Game {
                 .take(Self::HEIGHT)
                 .collect(),
             active_piece_data: None,
-            next_pieces: config
-                .tetromino_generator
-                .with_rng(&mut rng)
-                .take(config.preview_count)
-                .collect(),
+            next_pieces: VecDeque::new(),
             pieces_played: [0; 7],
             lines_cleared: 0,
             level: gamemode.start_level,
@@ -547,7 +542,7 @@ impl Game {
             config,
             mode: gamemode,
             state,
-            rng,
+            rng: rand::thread_rng(),
             modifiers: Vec::new(),
         }
     }

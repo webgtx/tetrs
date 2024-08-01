@@ -10,7 +10,7 @@ use rand::{
 
 use crate::Tetromino;
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(dead_code)]
 pub enum TetrominoGenerator {
@@ -59,6 +59,17 @@ impl TetrominoGenerator {
         TetrominoIterator {
             tetromino_generator: self,
             rng,
+        }
+    }
+}
+
+impl Clone for TetrominoGenerator {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Uniform => Self::uniform(),
+            Self::Bag { multiplicity, .. } => Self::bag(*multiplicity),
+            Self::Recency { .. } => Self::recency(),
+            Self::TotalRelative { .. } => Self::total_relative(),
         }
     }
 }
