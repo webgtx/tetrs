@@ -97,30 +97,36 @@ For more technical details see [Features of the Tetrs Engine](#features-of-the-t
 - Look of the game:
   - Graphics (Unicode, ASCII, 'Electronika 60').
   - Coloring (RGB Colors; 16 Colors (should work on all consoles), Monochrome).
-- Play of the game:
-  - Configurable controls (resettable).
-    <details>
-    
-    <summary> Default Game Controls </summary>
-    
-    | Key | Action |
-    | -: | :-: |
-    | `←` | Move left |
-    | `→` | Move right |
-    | `A` | Rotate left |
-    | `D` | Rotate right |
-    | (not set) | Rotate around (180°) |
-    | `↓` | Soft drop |
-    | `↑` | Hard drop |
-    | (not set) | Sonic drop |
-    | `Esc` | Pause game |
-    | `Ctrl`+`D` | Forfeit game |
-    | `Ctrl`+`C` | Exit program |
-    
-    </details>
   - Adjustable render rate and toggleable FPS counter.
-  - Rotation systems: *Ocular*, *Classic* and *Super*.
-  - *(Advanced)* "No soft drop lock": Enables soft drop not instantly locking pieces on ground even if keyboard enhancements are off, for better experience on typical consoles (soft drops for piece spins).
+- Play of the game:
+  - Change controls.
+  <details>
+  
+  <summary> Default Game Controls </summary>
+  
+  | Key | Action |
+  | -: | :-: |
+  | `←` | Move left |
+  | `→` | Move right |
+  | `A` | Rotate left |
+  | `D` | Rotate right |
+  | (not set) | Rotate around (180°) |
+  | `↓` | Soft drop |
+  | `↑` | Hard drop |
+  | (not set) | Sonic drop |
+  | `Esc` | Pause game |
+  | `Ctrl`+`D` | Forfeit game |
+  | `Ctrl`+`C` | Exit program |
+  
+  </details>
+  
+  - Configure game.
+    - Rotation system  (Ocular, Classic, Super),
+    - Piece generator (History, Uniform, Bag, Total-Relative),
+    - Preview count (0 - 8),
+    - DAS, ARR, hard drop delay, line clear delay, appearance delay,
+    - soft drop factor, ground time max,
+  - *Advanced*, No soft drop lock (Enables soft drop not instantly locking pieces on ground even if keyboard enhancements are off, for better experience on typical consoles (soft drops for piece spins)).
 - **Keep Savefile**: By default this program won't store anything and just let you play the game. If you **do** want `tetrs_terminal` to restore your settings and past games in the future then make sure this is set to **"On"**!
   
 ### Scoreboard
