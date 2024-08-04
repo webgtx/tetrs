@@ -663,7 +663,7 @@ impl GameMode {
     pub fn master() -> Self {
         Self {
             name: String::from("Master"),
-            start_level: Game::LEVEL_20G,
+            start_level: Game::LEVEL_20G.saturating_add(1),
             increment_level: true,
             limits: Limits {
                 lines: Some((true, 300)),

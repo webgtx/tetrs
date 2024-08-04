@@ -266,7 +266,7 @@ impl GameScreenRenderer for Renderer {
             }),
             game.mode().limits.level.map(|(_, max_lvl)| {
                 (
-                    "Levels remaining:",
+                    "Levels left to advance:",
                     max_lvl.get().saturating_sub(level.get()).to_string(),
                 )
             }),
