@@ -1068,7 +1068,9 @@ impl Game {
             turns -= 1;
         }
         if turns != 0 {
-            self.state.events.insert(InternalEvent::Rotate(turns), update_time);
+            self.state
+                .events
+                .insert(InternalEvent::Rotate(turns), update_time);
         }
         // Soft drop button pressed.
         if !dS0 && dS1 {
@@ -1172,7 +1174,9 @@ impl Game {
                     turns -= 1;
                 }
                 if turns != 0 {
-                    self.state.events.insert(InternalEvent::Rotate(turns), event_time);
+                    self.state
+                        .events
+                        .insert(InternalEvent::Rotate(turns), event_time);
                 }
                 self.state.events.insert(InternalEvent::Fall, event_time);
                 Some(next_piece)
@@ -1195,57 +1199,66 @@ impl Game {
                 if self.state.buttons_pressed[Button::MoveRight] {
                     dx += 1;
                 }
-                Some(if let Some(next_piece) = prev_piece.fits_at(&self.state.board, (dx, 0)) {
-                    let move_delay = if event == InternalEvent::MoveSlow {
-                        self.config.delayed_auto_shift
+                Some(
+                    if let Some(next_piece) = prev_piece.fits_at(&self.state.board, (dx, 0)) {
+                        let move_delay = if event == InternalEvent::MoveSlow {
+                            self.config.delayed_auto_shift
+                        } else {
+                            self.config.auto_repeat_rate
+                        }
+                        .min(
+                            Self::lock_delay(&self.state.level)
+                                .saturating_sub(Duration::from_millis(1)),
+                        );
+                        self.state
+                            .events
+                            .insert(InternalEvent::MoveFast, event_time + move_delay);
+                        next_piece
                     } else {
-                        self.config.auto_repeat_rate
-                    }
-                    .min(Self::lock_delay(&self.state.level).saturating_sub(Duration::from_millis(1)));
-                    self.state
-                        .events
-                        .insert(InternalEvent::MoveFast, event_time + move_delay);
-                    next_piece
-                } else {
-                    prev_piece
-                })
+                        prev_piece
+                    },
+                )
             }
             InternalEvent::Fall => {
                 let prev_piece = prev_piece.expect("falling event but no active piece");
                 // Try to drop active piece down by one, and queue next fall event.
-                Some(if let Some(dropped_piece) = prev_piece.fits_at(&self.state.board, (0, -1)) {
-                    // Drop delay is possibly faster due to soft drop button pressed.
-                    let soft_drop = self.state.buttons_pressed[Button::DropSoft]
-                        .then_some(self.config.soft_drop_factor);
-                    let drop_delay = Self::drop_delay(self.state.level, soft_drop);
-                    self.state
-                        .events
-                        .insert(InternalEvent::Fall, event_time + drop_delay);
-                    dropped_piece
-                } else {
-                    // Otherwise piece could not move down.
-                    prev_piece
-                })
+                Some(
+                    if let Some(dropped_piece) = prev_piece.fits_at(&self.state.board, (0, -1)) {
+                        // Drop delay is possibly faster due to soft drop button pressed.
+                        let soft_drop = self.state.buttons_pressed[Button::DropSoft]
+                            .then_some(self.config.soft_drop_factor);
+                        let drop_delay = Self::drop_delay(self.state.level, soft_drop);
+                        self.state
+                            .events
+                            .insert(InternalEvent::Fall, event_time + drop_delay);
+                        dropped_piece
+                    } else {
+                        // Otherwise piece could not move down.
+                        prev_piece
+                    },
+                )
             }
             InternalEvent::SoftDrop => {
                 let prev_piece = prev_piece.expect("softdrop event but no active piece");
                 // Try to drop active piece down by one, and queue next fall event.
-                Some(if let Some(dropped_piece) = prev_piece.fits_at(&self.state.board, (0, -1)) {
-                    let soft_drop = self.state.buttons_pressed[Button::DropSoft]
-                        .then_some(self.config.soft_drop_factor);
-                    let drop_delay = Self::drop_delay(self.state.level, soft_drop);
-                    self.state
-                        .events
-                        .insert(InternalEvent::Fall, event_time + drop_delay);
-                    dropped_piece
-                } else {
-                    // Otherwise ciece could not move down.
-                    // Immediately lock (unless option for it is disabled).
-                    if !self.config.no_soft_drop_lock {
-                        self.state.events.insert(InternalEvent::Lock, event_time);
-                    }
-                    prev_piece
-                })
+                Some(
+                    if let Some(dropped_piece) = prev_piece.fits_at(&self.state.board, (0, -1)) {
+                        let soft_drop = self.state.buttons_pressed[Button::DropSoft]
+                            .then_some(self.config.soft_drop_factor);
+                        let drop_delay = Self::drop_delay(self.state.level, soft_drop);
+                        self.state
+                            .events
+                            .insert(InternalEvent::Fall, event_time + drop_delay);
+                        dropped_piece
+                    } else {
+                        // Otherwise ciece could not move down.
+                        // Immediately lock (unless option for it is disabled).
+                        if !self.config.no_soft_drop_lock {
+                            self.state.events.insert(InternalEvent::Lock, event_time);
+                        }
+                        prev_piece
+                    },
+                )
             }
             InternalEvent::SonicDrop => {
                 let prev_piece = prev_piece.expect("sonicdrop event but no active piece");
@@ -1369,15 +1382,23 @@ impl Game {
         // Piece changed.
         if next_piece.is_some() && prev_piece != next_piece {
             // No move event scheduled but user wants to move to one side, add a move event.
-            if !(self.state.events.contains_key(&InternalEvent::MoveSlow) || self.state.events.contains_key(&InternalEvent::MoveFast))
-                && (self.state.buttons_pressed[Button::MoveLeft] != self.state.buttons_pressed[Button::MoveRight]) {
-                self.state.events.insert(InternalEvent::MoveFast, event_time);
+            if !(self.state.events.contains_key(&InternalEvent::MoveSlow)
+                || self.state.events.contains_key(&InternalEvent::MoveFast))
+                && (self.state.buttons_pressed[Button::MoveLeft]
+                    != self.state.buttons_pressed[Button::MoveRight])
+            {
+                self.state
+                    .events
+                    .insert(InternalEvent::MoveFast, event_time);
             }
             // No fall event scheduled but piece might be able to, schedule fall event.
             if !self.state.events.contains_key(&InternalEvent::Fall) {
-                let soft_drop = self.state.buttons_pressed[Button::DropSoft].then_some(self.config.soft_drop_factor);
+                let soft_drop = self.state.buttons_pressed[Button::DropSoft]
+                    .then_some(self.config.soft_drop_factor);
                 let drop_delay = Self::drop_delay(self.state.level, soft_drop);
-                self.state.events.insert(InternalEvent::Fall, event_time + drop_delay);
+                self.state
+                    .events
+                    .insert(InternalEvent::Fall, event_time + drop_delay);
             }
         }
         self.state.active_piece_data = next_piece.map(|next_piece| {

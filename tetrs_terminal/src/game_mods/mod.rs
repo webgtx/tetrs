@@ -1,2 +1,2 @@
-pub mod util;
 pub mod puzzle_mode;
+pub mod util;

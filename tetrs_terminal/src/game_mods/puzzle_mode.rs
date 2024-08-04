@@ -54,7 +54,7 @@ pub fn make_game() -> Game {
         puzzle_pieces.len()
     };
     let mut init = true;
-    let mut current_puzzle_idx = 0;//+16+8; // TODO: Remove.
+    let mut current_puzzle_idx = 0; //+16+8; // TODO: Remove.
     let mut current_puzzle_attempt = 1;
     let mut current_puzzle_piececnt_limit = 0;
     let puzzle_modifier: FnGameMod = Box::new(
@@ -149,6 +149,7 @@ pub fn make_game() -> Game {
     game
 }
 
+#[rustfmt::skip]
 fn list_of_puzzles() -> [(&'static str, Vec<&'static [u8; 10]>, VecDeque<Tetromino>); 24] {
     [
         /* Puzzle template.

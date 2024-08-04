@@ -525,10 +525,19 @@ impl<T: Write> App<T> {
 
     fn newgame(&mut self) -> io::Result<MenuUpdate> {
         let preset_gamemodes = [
-            (GameMode::sprint(NonZeroU32::try_from(3).unwrap()), "how fast can you clear?"),
+            (
+                GameMode::sprint(NonZeroU32::try_from(3).unwrap()),
+                "how fast can you clear?",
+            ),
             (GameMode::marathon(), "can you reach level 20?"),
-            (GameMode::ultra(NonZeroU32::try_from(3).unwrap()), "3min. is all you got!"),
-            (GameMode::master(), "challenging - the pieces don't even fly!"),
+            (
+                GameMode::ultra(NonZeroU32::try_from(3).unwrap()),
+                "3min. is all you got!",
+            ),
+            (
+                GameMode::master(),
+                "challenging - the pieces don't even fly!",
+            ),
         ];
         let (d_time, d_score, d_pieces, d_lines, d_level) = (Duration::from_secs(5), 200, 10, 5, 1);
         let mut selected = 0usize;
@@ -581,7 +590,7 @@ impl<T: Write> App<T> {
                     if selected == selected_cnt - 2 {
                         ">>> Puzzle: only spins and perfect clears! <<<"
                     } else {
-                        "~ Puzzle ~"
+                        "Puzzle (!)"
                     }
                 )))?;
             // Render custom mode option.
